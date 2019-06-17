@@ -1,0 +1,31 @@
+{
+  "scripts": {
+    "build": "tsc --strict",
+    "start": "tsc --strict && node dist/index",
+    "start-and-debug": "tsc --strict && node --inspect dist/index",
+    "format": "prettier",
+    "lint": "eslint src/**",
+    "postinstall": "tsc --strict"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^1.10.2",
+    "@typescript-eslint/parser": "^1.10.2",
+    "eslint": "^5.16.0",
+    "eslint-config-prettier": "^4.3.0",
+    "prettier": "^1.18.2"
+  },
+  "dependencies": {
+    "@types/eventsource": "^1.1.0",
+    "@types/express": "^4.17.0",
+    "@types/ws": "^6.0.1",
+    "axios": "^0.19.0",
+    "bitmessage-inspired-proof-of-work": "../bitmessage-inspired-proof-of-work/",
+    "body-parser": "^1.19.0",
+    "express": "^4.17.1",
+    "libsodium-wrappers": "^0.7.4",
+    "mobx": "^5.10.1",
+    "proxy-agent": "^3.1.0",
+    "ws": "^7.0.0",
+    "typescript": "^3.5.2"
+  }
+}
