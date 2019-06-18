@@ -10,6 +10,7 @@ import * as url from "url";
 import { Worker } from "worker_threads";
 import * as EventEmitter from "events";
 import * as path from "path";
+import { prepare, unprepare } from "bigint-json-interop";
 
 type Unsubscribe = () => void;
 
@@ -73,36 +74,6 @@ const deriveMapFromObservableSet = <K, V>(
     }
   });
   return { map, stop: unsubscribe };
-};
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const prepare = (object: any): any => {
-  return JSON.parse(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    JSON.stringify(object, (_key, value): any => {
-      if (typeof value === "bigint") {
-        return { type: "bigint", value: String(value) };
-      }
-
-      return value;
-    })
-  );
-};
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const unprepare = (object: any): any => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return JSON.parse(JSON.stringify(object), (_key, value): any => {
-    if (typeof value !== "object" || value === null) {
-      return value;
-    }
-
-    if (value.type === "bigint") {
-      return BigInt(value.value);
-    }
-
-    return value;
-  });
 };
 
 const instantiate = async (

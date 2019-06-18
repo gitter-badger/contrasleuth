@@ -247,11 +247,15 @@ balanced-match@^1.0.0:
   resolved "https://registry.yarnpkg.com/balanced-match/-/balanced-match-1.0.0.tgz#89b4d199ab2bee49de164ea02b89ce462d71b767"
   integrity sha1-ibTRmasr7kneFk6gK4nORi1xt2c=
 
+bigint-json-interop@../bigint-json-interop:
+  version "1.0.0"
+
 bitmessage-inspired-proof-of-work@../bitmessage-inspired-proof-of-work/:
   version "1.0.0"
   dependencies:
     "@types/libsodium-wrappers" "^0.7.5"
     libsodium-wrappers "^0.7.4"
+    typescript "^3.5.2"
 
 body-parser@1.19.0, body-parser@^1.19.0:
   version "1.19.0"
