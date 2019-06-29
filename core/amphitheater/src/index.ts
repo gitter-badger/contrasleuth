@@ -15,13 +15,13 @@ import { shuffle } from "lodash";
 
 type Unsubscribe = () => void;
 
-interface AmphitheaterObject {
+export interface AmphitheaterObject {
   payload: string;
   nonce: bigint;
   expirationTime: bigint;
 }
 
-interface AmphitheaterPeer {
+export interface AmphitheaterPeer {
   address: string;
   nonce: bigint;
   expirationTime: bigint;
@@ -119,6 +119,15 @@ const instantiate = async (
 
   const app = express();
   app.use(bodyParser.json());
+  app.use((_, response, next): void => {
+    // https://enable-cors.org/server_expressjs.html
+    response.header("Access-Control-Allow-Origin", "*");
+    response.header(
+      "Access-Control-Allow-Headers",
+      "Origin, X-Requested-With, Content-Type, Accept"
+    );
+    next();
+  });
 
   const gossipWebSocketServer = new WebSocket.Server({ noServer: true });
   const peerWebSocketServer = new WebSocket.Server({ noServer: true });
@@ -291,7 +300,10 @@ const instantiate = async (
     const peerSocket = (): void => {
       const socketURL = new url.URL("ws://placeholder.hostname/peers");
       socketURL.host = peer.address;
-      const socket = new WebSocket(socketURL.toString(), { agent });
+      const socket = new WebSocket(socketURL.toString(), {
+        agent,
+        perMessageDeflate: false
+      });
 
       socket.on("close", cleanup);
       socket.on("error", cleanup);
@@ -336,7 +348,10 @@ const instantiate = async (
     const objectSocket = (): void => {
       const socketURL = new url.URL("ws://placeholder.hostname/gossip");
       socketURL.host = peer.address;
-      const socket = new WebSocket(socketURL.toString(), { agent });
+      const socket = new WebSocket(socketURL.toString(), {
+        agent,
+        perMessageDeflate: false
+      });
 
       socket.on("close", cleanup);
       socket.on("error", cleanup);
