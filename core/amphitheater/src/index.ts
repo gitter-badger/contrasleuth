@@ -11,6 +11,7 @@ import { Worker } from "worker_threads";
 import * as EventEmitter from "events";
 import * as path from "path";
 import { prepare, unprepare } from "bigint-json-interop";
+import { shuffle } from "lodash";
 
 type Unsubscribe = () => void;
 
@@ -127,7 +128,7 @@ const instantiate = async (
       socket.send(hashObject(object));
     };
 
-    objects.forEach((object): void => {
+    shuffle([...objects]).forEach((object): void => {
       sendObjectHash(object);
     });
 
@@ -146,7 +147,7 @@ const instantiate = async (
       socket.send(JSON.stringify(prepare(peer)));
     };
 
-    peers.forEach((peer): void => {
+    shuffle([...peers]).forEach((peer): void => {
       sendPeer(peer);
     });
 
