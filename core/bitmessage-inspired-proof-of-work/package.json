@@ -17,8 +17,9 @@
     "prettier": "^1.18.2"
   },
   "dependencies": {
-    "typescript": "^3.5.2",
     "@types/libsodium-wrappers": "^0.7.5",
-    "libsodium-wrappers": "^0.7.4"
+    "jsbi": "^2.0.5",
+    "libsodium-wrappers": "^0.7.4",
+    "typescript": "^3.5.2"
   }
 }
