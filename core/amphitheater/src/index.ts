@@ -1,14 +1,14 @@
-import * as express from "express";
+import express from "express";
 import { observe, ObservableSet, autorun } from "mobx";
 import axios from "axios";
 import instantiatePoW from "bitmessage-inspired-proof-of-work";
 import * as http from "http";
 import * as bodyParser from "body-parser";
-import * as sodium from "libsodium-wrappers";
-import * as WebSocket from "ws";
+import sodium from "libsodium-wrappers";
+import WebSocket from "ws";
 import * as url from "url";
 import { Worker } from "worker_threads";
-import * as EventEmitter from "events";
+import EventEmitter from "events";
 import * as path from "path";
 import { prepare, unprepare } from "bigint-json-interop";
 import { shuffle } from "lodash";
@@ -63,17 +63,22 @@ const deriveMapFromObservableSet = <K, V>(
 ): MapDerivationResult<K, V> => {
   const map: Map<K, V> = new Map();
 
-  set.forEach((element): void => {
-    map.set(extractKey(element), element);
-  });
-
-  const unsubscribe = observe(set, (change): void => {
-    if (change.type === "add") {
-      map.set(extractKey(change.newValue), change.newValue);
-    } else if (change.type === "delete") {
-      map.delete(extractKey(change.oldValue));
+  set.forEach(
+    (element): void => {
+      map.set(extractKey(element), element);
     }
-  });
+  );
+
+  const unsubscribe = observe(
+    set,
+    (change): void => {
+      if (change.type === "add") {
+        map.set(extractKey(change.newValue), change.newValue);
+      } else if (change.type === "delete") {
+        map.delete(extractKey(change.oldValue));
+      }
+    }
+  );
   return { map, stop: unsubscribe };
 };
 
@@ -110,175 +115,217 @@ const instantiate = async (
   ): Promise<bigint> => {
     const worker = new Worker(path.join(__dirname, "proof-of-work-worker.js"));
     worker.postMessage({ payload, timeToLive });
-    return new Promise((resolve): void => {
-      worker.on("message", (value): void => {
-        resolve(value);
-      });
-    });
+    return new Promise(
+      (resolve): void => {
+        worker.on(
+          "message",
+          (value): void => {
+            resolve(value);
+          }
+        );
+      }
+    );
   };
 
   const app = express();
   app.use(bodyParser.json());
-  app.use((_, response, next): void => {
-    // https://enable-cors.org/server_expressjs.html
-    response.header("Access-Control-Allow-Origin", "*");
-    response.header(
-      "Access-Control-Allow-Headers",
-      "Origin, X-Requested-With, Content-Type, Accept"
-    );
-    next();
-  });
+  app.use(
+    (_, response, next): void => {
+      // https://enable-cors.org/server_expressjs.html
+      response.header("Access-Control-Allow-Origin", "*");
+      response.header(
+        "Access-Control-Allow-Headers",
+        "Origin, X-Requested-With, Content-Type, Accept"
+      );
+      next();
+    }
+  );
 
   const gossipWebSocketServer = new WebSocket.Server({ noServer: true });
   const peerWebSocketServer = new WebSocket.Server({ noServer: true });
 
-  gossipWebSocketServer.on("connection", (socket): void => {
-    const sendObjectHash = (object: AmphitheaterObject): void => {
-      socket.send(hashObject(object));
-    };
+  gossipWebSocketServer.on(
+    "connection",
+    (socket): void => {
+      const sendObjectHash = (object: AmphitheaterObject): void => {
+        socket.send(hashObject(object));
+      };
 
-    shuffle([...objects]).forEach((object): void => {
-      sendObjectHash(object);
-    });
+      shuffle([...objects]).forEach(
+        (object): void => {
+          sendObjectHash(object);
+        }
+      );
 
-    const unsubscribe = observe(objects, (change): void => {
-      if (change.type !== "add") return;
-      sendObjectHash(change.newValue);
-    });
+      const unsubscribe = observe(
+        objects,
+        (change): void => {
+          if (change.type !== "add") return;
+          sendObjectHash(change.newValue);
+        }
+      );
 
-    socket.on("close", (): void => {
-      unsubscribe();
-    });
-  });
+      socket.on(
+        "close",
+        (): void => {
+          unsubscribe();
+        }
+      );
+    }
+  );
 
-  peerWebSocketServer.on("connection", (socket): void => {
-    const sendPeer = (peer: AmphitheaterPeer): void => {
-      socket.send(JSON.stringify(prepare(peer)));
-    };
+  peerWebSocketServer.on(
+    "connection",
+    (socket): void => {
+      const sendPeer = (peer: AmphitheaterPeer): void => {
+        socket.send(JSON.stringify(prepare(peer)));
+      };
 
-    shuffle([...peers]).forEach((peer): void => {
-      sendPeer(peer);
-    });
+      shuffle([...peers]).forEach(
+        (peer): void => {
+          sendPeer(peer);
+        }
+      );
 
-    const unsubscribe = observe(peers, (change): void => {
-      if (change.type === "add") {
-        sendPeer(change.newValue);
+      const unsubscribe = observe(
+        peers,
+        (change): void => {
+          if (change.type === "add") {
+            sendPeer(change.newValue);
+          }
+        }
+      );
+
+      socket.on(
+        "close",
+        (): void => {
+          unsubscribe();
+        }
+      );
+    }
+  );
+
+  app.get(
+    "/gossip/:hash",
+    (request, response): void => {
+      const hash = request.params.hash;
+      if (typeof hash !== "string") {
+        response.sendStatus(400);
+        return;
       }
-    });
 
-    socket.on("close", (): void => {
-      unsubscribe();
-    });
-  });
+      if (!objectMap.map.has(hash)) {
+        response.status(404);
+        response.end();
+        return;
+      }
 
-  app.get("/gossip/:hash", (request, response): void => {
-    const hash = request.params.hash;
-    if (typeof hash !== "string") {
-      response.status(500);
-      response.end();
-      return;
+      response.send(prepare(objectMap.map.get(hash)));
     }
+  );
 
-    if (!objectMap.map.has(hash)) {
-      response.status(404);
+  app.post(
+    "/peers",
+    (request, response): void => {
+      const data = unprepare({
+        address: request.body.address,
+        nonce: request.body.nonce,
+        expirationTime: request.body.expirationTime
+      });
+      if (
+        typeof data.address !== "string" ||
+        typeof data.nonce !== "bigint" ||
+        typeof data.expirationTime !== "bigint"
+      ) {
+        response.sendStatus(400);
+        return;
+      }
+
+      const address = data.address;
+      const nonce = BigInt(data.nonce);
+      const expirationTime = BigInt(data.expirationTime);
+
+      const currentTime = BigInt(Date.now()) / 1000n;
+      const timeToLive = expirationTime - currentTime;
+
+      const peer: AmphitheaterPeer = { address, nonce, expirationTime };
+
+      const peerHash = hashPeer(peer);
+
+      if (
+        peerMap.map.has(peerHash) ||
+        !verifyPeer(peerHash, timeToLive, nonce)
+      ) {
+        response.end();
+        return;
+      }
+
+      peers.add(peer);
+
       response.end();
-      return;
     }
+  );
 
-    response.send(prepare(objectMap.map.get(hash)));
-  });
+  app.post(
+    "/gossip",
+    (request, response): void => {
+      const data = unprepare({
+        payload: request.body.payload,
+        expirationTime: request.body.expirationTime,
+        nonce: request.body.nonce
+      });
 
-  app.post("/peers", (request, response): void => {
-    const data = unprepare({
-      address: request.body.address,
-      nonce: request.body.nonce,
-      expirationTime: request.body.expirationTime
-    });
-    if (
-      typeof data.address !== "string" ||
-      typeof data.nonce !== "bigint" ||
-      typeof data.expirationTime !== "bigint"
-    ) {
-      response.status(500);
+      const payload = data.payload;
+
+      if (
+        typeof payload !== "string" ||
+        typeof data.nonce !== "bigint" ||
+        typeof data.expirationTime !== "bigint"
+      ) {
+        response.sendStatus(400);
+        return;
+      }
+
+      const nonce = BigInt(data.nonce);
+      const expirationTime = BigInt(data.expirationTime);
+
+      const currentTime = BigInt(Date.now()) / 1000n;
+      const timeToLive = expirationTime - currentTime;
+
+      const object: AmphitheaterObject = { payload, nonce, expirationTime };
+
+      const objectHash = hashObject(object);
+
+      if (
+        objectMap.map.has(objectHash) ||
+        timeToLive < 0 ||
+        !verify(objectHash, timeToLive, nonce)
+      ) {
+        response.end();
+        return;
+      }
+
+      objects.add({ payload, nonce, expirationTime });
       response.end();
-      return;
     }
-
-    const address = data.address;
-    const nonce = BigInt(data.nonce);
-    const expirationTime = BigInt(data.expirationTime);
-
-    const currentTime = BigInt(Date.now()) / 1000n;
-    const timeToLive = expirationTime - currentTime;
-
-    const peer: AmphitheaterPeer = { address, nonce, expirationTime };
-
-    const peerHash = hashPeer(peer);
-
-    if (peerMap.map.has(peerHash) || !verifyPeer(peerHash, timeToLive, nonce)) {
-      response.end();
-      return;
-    }
-
-    peers.add(peer);
-
-    response.end();
-  });
-
-  app.post("/gossip", (request, response): void => {
-    const data = unprepare({
-      payload: request.body.payload,
-      expirationTime: request.body.expirationTime,
-      nonce: request.body.nonce
-    });
-
-    const payload = data.payload;
-
-    if (
-      typeof payload !== "string" ||
-      typeof data.nonce !== "bigint" ||
-      typeof data.expirationTime !== "bigint"
-    ) {
-      response.status(500);
-      response.end();
-      return;
-    }
-
-    const nonce = BigInt(data.nonce);
-    const expirationTime = BigInt(data.expirationTime);
-
-    const currentTime = BigInt(Date.now()) / 1000n;
-    const timeToLive = expirationTime - currentTime;
-
-    const object: AmphitheaterObject = { payload, nonce, expirationTime };
-
-    const objectHash = hashObject(object);
-
-    if (
-      objectMap.map.has(objectHash) ||
-      timeToLive < 0 ||
-      !verify(objectHash, timeToLive, nonce)
-    ) {
-      response.end();
-      return;
-    }
-
-    objects.add({ payload, nonce, expirationTime });
-    response.end();
-  });
+  );
 
   const purgeExpiredItemsInterval = setInterval((): void => {
-    peers.forEach((peer): void => {
-      if (peer.expirationTime < BigInt(Date.now()) / 1000n) {
-        peers.delete(peer);
+    peers.forEach(
+      (peer): void => {
+        if (peer.expirationTime < BigInt(Date.now()) / 1000n) {
+          peers.delete(peer);
+        }
       }
-    });
+    );
 
-    objects.forEach((object): void => {
-      if (object.expirationTime < BigInt(Date.now()) / 1000n) {
-        objects.delete(object);
+    objects.forEach(
+      (object): void => {
+        if (object.expirationTime < BigInt(Date.now()) / 1000n) {
+          objects.delete(object);
+        }
       }
-    });
+    );
   }, 1000);
 
   const events = new EventEmitter();
@@ -308,41 +355,47 @@ const instantiate = async (
       socket.on("close", cleanup);
       socket.on("error", cleanup);
 
-      peerEvents.on("stop", (): void => {
-        socket.off("close", cleanup);
-        socket.close();
-      });
-
-      socket.on("message", (message): void => {
-        let peer;
-        try {
-          peer = JSON.parse(message.toString());
-        } catch (error) {
-          return;
+      peerEvents.on(
+        "stop",
+        (): void => {
+          socket.off("close", cleanup);
+          socket.close();
         }
+      );
 
-        if (
-          typeof peer.address !== "string" ||
-          typeof peer.nonce !== "bigint" ||
-          typeof peer.expirationTime !== "bigint"
-        ) {
-          return;
+      socket.on(
+        "message",
+        (message): void => {
+          let peer;
+          try {
+            peer = JSON.parse(message.toString());
+          } catch (error) {
+            return;
+          }
+
+          if (
+            typeof peer.address !== "string" ||
+            typeof peer.nonce !== "bigint" ||
+            typeof peer.expirationTime !== "bigint"
+          ) {
+            return;
+          }
+
+          const address = peer.address;
+          const nonce = BigInt(peer.nonce);
+          const expirationTime = BigInt(peer.expirationTime);
+
+          const timeToLive = expirationTime - BigInt(Date.now()) / 1000n;
+          if (timeToLive < 0) return;
+
+          const peerHash = hashPeer(peer);
+
+          if (peerMap.map.has(peerHash) || !verify(peerHash, timeToLive, nonce))
+            return;
+
+          peers.add({ address, nonce, expirationTime });
         }
-
-        const address = peer.address;
-        const nonce = BigInt(peer.nonce);
-        const expirationTime = BigInt(peer.expirationTime);
-
-        const timeToLive = expirationTime - BigInt(Date.now()) / 1000n;
-        if (timeToLive < 0) return;
-
-        const peerHash = hashPeer(peer);
-
-        if (peerMap.map.has(peerHash) || !verify(peerHash, timeToLive, nonce))
-          return;
-
-        peers.add({ address, nonce, expirationTime });
-      });
+      );
     };
 
     const objectSocket = (): void => {
@@ -356,123 +409,149 @@ const instantiate = async (
       socket.on("close", cleanup);
       socket.on("error", cleanup);
 
-      peerEvents.on("stop", (): void => {
-        socket.off("close", cleanup);
-        socket.close();
-      });
+      peerEvents.on(
+        "stop",
+        (): void => {
+          socket.off("close", cleanup);
+          socket.close();
+        }
+      );
 
-      socket.on("message", (data): void => {
-        const hash = data.toString();
-        if (!objectMap.map.has(hash)) {
+      socket.on(
+        "message",
+        (data): void => {
+          const hash = data.toString();
+          if (!objectMap.map.has(hash)) {
+            const objectURL = new url.URL(
+              "gossip/" + hash,
+              "http://placeholder.hostname/"
+            );
+            objectURL.host = peer.address;
+            objectURL.search = "";
+            axios
+              .get(objectURL.toString(), { httpAgent: agent })
+              .then(
+                ({ data: rawData }): void => {
+                  const data = unprepare(rawData);
+
+                  if (data === undefined || data === null) return;
+                  if (
+                    typeof data.payload !== "string" ||
+                    typeof data.nonce !== "bigint" ||
+                    typeof data.expirationTime !== "bigint"
+                  ) {
+                    return;
+                  }
+                  const payload = data.payload;
+                  const nonce = BigInt(data.nonce);
+                  const expirationTime = BigInt(data.expirationTime);
+
+                  const timeToLive =
+                    expirationTime - BigInt(Date.now()) / 1000n;
+
+                  if (timeToLive < 0) return;
+
+                  const object: AmphitheaterObject = {
+                    payload,
+                    nonce,
+                    expirationTime
+                  };
+
+                  const objectHash = hashObject(object);
+
+                  if (
+                    objectMap.map.has(objectHash) ||
+                    !verify(objectHash, timeToLive, nonce)
+                  ) {
+                    return;
+                  }
+
+                  objects.add(object);
+                }
+              )
+              .catch(console.error);
+          }
+        }
+      );
+    };
+
+    peerSocket();
+    objectSocket();
+
+    const unsubscribeObjects = observe(
+      objects,
+      (change): void => {
+        if (change.type === "add") {
+          const hash = hashObject(change.newValue);
           const objectURL = new url.URL(
             "gossip/" + hash,
             "http://placeholder.hostname/"
           );
           objectURL.host = peer.address;
           objectURL.search = "";
-          axios
-            .get(objectURL.toString(), { httpAgent: agent })
-            .then(({ data: rawData }): void => {
-              const data = unprepare(rawData);
+          axios.get(objectURL.toString(), { httpAgent: agent }).catch(
+            (error): void => {
+              if (error.response) {
+                if (error.response.status === 404) {
+                  const postURL = new url.URL(
+                    "gossip/",
+                    "http://placeholder.hostname"
+                  );
+                  postURL.host = peer.address;
 
-              if (data === undefined || data === null) return;
-              if (
-                typeof data.payload !== "string" ||
-                typeof data.nonce !== "bigint" ||
-                typeof data.expirationTime !== "bigint"
-              ) {
-                return;
-              }
-              const payload = data.payload;
-              const nonce = BigInt(data.nonce);
-              const expirationTime = BigInt(data.expirationTime);
+                  axios
+                    .post(postURL.toString(), prepare(change.newValue), {
+                      httpAgent: agent
+                    })
+                    .catch(console.error);
 
-              const timeToLive = expirationTime - BigInt(Date.now()) / 1000n;
-
-              if (timeToLive < 0) return;
-
-              const object: AmphitheaterObject = {
-                payload,
-                nonce,
-                expirationTime
-              };
-
-              const objectHash = hashObject(object);
-
-              if (
-                objectMap.map.has(objectHash) ||
-                !verify(objectHash, timeToLive, nonce)
-              ) {
-                return;
+                  return;
+                }
               }
 
-              objects.add(object);
-            });
-        }
-      });
-    };
-
-    peerSocket();
-    objectSocket();
-
-    const unsubscribeObjects = observe(objects, (change): void => {
-      if (change.type === "add") {
-        const hash = hashObject(change.newValue);
-        const objectURL = new url.URL(
-          "gossip/" + hash,
-          "http://placeholder.hostname/"
-        );
-        objectURL.host = peer.address;
-        objectURL.search = "";
-        axios
-          .get(objectURL.toString(), { httpAgent: agent })
-          .catch((error): void => {
-            if (error.response) {
-              if (error.response.status === 404) {
-                const postURL = new url.URL(
-                  "gossip/",
-                  "http://placeholder.hostname"
-                );
-                postURL.host = peer.address;
-
-                axios.post(postURL.toString(), prepare(change.newValue), {
-                  httpAgent: agent
-                });
-
-                return;
-              }
+              // eslint-disable-next-line no-console
+              console.error(error);
             }
-
-            // eslint-disable-next-line no-console
-            console.error(error);
-          });
+          );
+        }
       }
-    });
+    );
 
-    const unsubscribePeers = observe(peers, (change): void => {
-      if (change.type === "add") {
-        const postURL = new url.URL("peers/", "http://placeholder.hostname");
-        postURL.host = peer.address;
+    const unsubscribePeers = observe(
+      peers,
+      (change): void => {
+        if (change.type === "add") {
+          const postURL = new url.URL("peers/", "http://placeholder.hostname");
+          postURL.host = peer.address;
 
-        axios.post(postURL.toString(), prepare(change.newValue), {
-          httpAgent: agent
-        });
+          axios
+            .post(postURL.toString(), prepare(change.newValue), {
+              httpAgent: agent
+            })
+            .catch(console.error);
+        }
       }
-    });
+    );
 
-    peerEvents.on("stop", (): void => {
-      unsubscribeObjects();
-      unsubscribePeers();
-    });
+    peerEvents.on(
+      "stop",
+      (): void => {
+        unsubscribeObjects();
+        unsubscribePeers();
+      }
+    );
   };
 
   peers.forEach(handlePeer);
 
-  observe(peers, (change): void => {
-    if (change.type === "add") {
-      handlePeer(change.newValue);
+  observe(
+    peers,
+    (change): void => {
+      if (change.type === "add") {
+        handlePeer(change.newValue);
+      }
     }
-  });
+  );
 
   const createPeer = async (
     address: string,
@@ -519,43 +598,48 @@ const instantiate = async (
     );
   };
 
-  const stopAutoAdvertisePeer = autorun((): void => {
-    clearInterval(advertisePeerInterval);
-    advertisePeerInterval = setInterval(advertisePeer, 60000);
-    advertisePeer();
-  });
+  const stopAutoAdvertisePeer = autorun(
+    (): void => {
+      clearInterval(advertisePeerInterval);
+      advertisePeerInterval = setInterval(advertisePeer, 60000);
+      advertisePeer();
+    }
+  );
 
   const server = http.createServer(app);
 
-  server.on("upgrade", (request, socket, head): void => {
-    const pathname = url.parse(request.url).pathname;
+  server.on(
+    "upgrade",
+    (request, socket, head): void => {
+      const pathname = url.parse(request.url).pathname;
 
-    if (pathname === "/gossip") {
-      gossipWebSocketServer.handleUpgrade(
-        request,
-        socket,
-        head,
-        (socket): void => {
-          gossipWebSocketServer.emit("connection", socket, request);
-        }
-      );
-      return;
+      if (pathname === "/gossip") {
+        gossipWebSocketServer.handleUpgrade(
+          request,
+          socket,
+          head,
+          (socket): void => {
+            gossipWebSocketServer.emit("connection", socket, request);
+          }
+        );
+        return;
+      }
+
+      if (pathname === "/peers") {
+        peerWebSocketServer.handleUpgrade(
+          request,
+          socket,
+          head,
+          (socket): void => {
+            peerWebSocketServer.emit("connection", socket, request);
+          }
+        );
+        return;
+      }
+
+      socket.destroy();
     }
-
-    if (pathname === "/peers") {
-      peerWebSocketServer.handleUpgrade(
-        request,
-        socket,
-        head,
-        (socket): void => {
-          peerWebSocketServer.emit("connection", socket, request);
-        }
-      );
-      return;
-    }
-
-    socket.destroy();
-  });
+  );
 
   const stop = (): void => {
     server.close();
