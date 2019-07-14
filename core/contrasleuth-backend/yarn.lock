@@ -131,8 +131,8 @@ amphitheater@../amphitheater/:
     body-parser "^1.19.0"
     express "^4.17.1"
     libsodium-wrappers "^0.7.4"
-    lodash "^4.17.11"
-    mobx "^5.10.1"
+    lodash "^4.17.13"
+    mobx "5.11.0"
     proxy-agent "^3.1.0"
     typescript "^3.5.2"
     ws "^7.0.0"
@@ -668,10 +668,10 @@ libsodium@0.7.4:
   resolved "https://registry.yarnpkg.com/libsodium/-/libsodium-0.7.4.tgz#a5bccd65e3a13b34147ea109be3c65d89f90b074"
   integrity sha512-fTU3vUdrxQzhPAAjmTSqKk4LzYbR0OtcYjp1P92AlH50JIxXZFEIXWh1yryCmU6RLGfwS2IzBdZjbmpYf/TlyQ==
 
-lodash@^4.17.11:
-  version "4.17.13"
-  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.13.tgz#0bdc3a6adc873d2f4e0c4bac285df91b64fc7b93"
-  integrity sha512-vm3/XWXfWtRua0FkUyEHBZy8kCPjErNBT9fJx8Zvs+U6zjqPbTUOpkaoum3O5uiA8sm+yNMHXfYkTUHFoMxFNA==
+lodash@^4.17.13:
+  version "4.17.14"
+  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.14.tgz#9ce487ae66c96254fe20b599f21b6816028078ba"
+  integrity sha512-mmKYbW3GLuJeX+iGP+Y7Gp1AiGHGbXHCOh/jZmrawMmsE7MS4znI3RL2FsjbqOyMayHInjOeykW7PEajUk1/xw==
 
 lowercase-keys@^1.0.0, lowercase-keys@^1.0.1:
   version "1.0.1"
@@ -728,7 +728,7 @@ mimic-response@^1.0.0, mimic-response@^1.0.1:
   resolved "https://registry.yarnpkg.com/mimic-response/-/mimic-response-1.0.1.tgz#4923538878eef42063cb8a3e3b0798781487ab1b"
   integrity sha512-j5EctnkH7amfV/q5Hgmoal1g2QHFJRraOtmx0JpIqkxhBhI/lJSl1nMpQ45hVarwNETOoWEimndZ4QK0RHxuxQ==
 
-mobx@^5.10.1:
+mobx@5.11.0:
   version "5.11.0"
   resolved "https://registry.yarnpkg.com/mobx/-/mobx-5.11.0.tgz#58c64769bc2408ccde35fc2bac4cd5b8ae7b28a6"
   integrity sha512-WMZCgjuW9vo2MhumrhJa0byTGdlZQcTKzLW9LoqMdmqVqWnG74HOSXWJ0YpxBngsc/rAUMwvdy+CVnw+/a4yeg==

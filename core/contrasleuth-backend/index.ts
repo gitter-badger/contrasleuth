@@ -408,12 +408,12 @@ const deriveInbox = () => {
   reactiveParse();
 };
 
-const findUnmoderatedGroup = (() => {
-  const groupMap = deriveMapFromObservableSet(groups, group =>
-    JSON.stringify(group.key.key)
+const findUnmoderatedGroup = (
+  key: Uint8Array
+): ContrasleuthUnmoderatedGroup | undefined =>
+  [...groups].find(
+    group => JSON.stringify(group.key.key) === JSON.stringify(key)
   );
-  return (key: Uint8Array) => groupMap.map.get(JSON.stringify(key));
-})();
 
 const readFile = promisify(fs.readFile);
 
