@@ -4,3 +4,8 @@ repl-tests/
 .vscode/
 contrasleuth.json
 yarn-error.log
+
+# Remote - Containers extension
+.devcontainer
+.vscode
+/yarn.lock
