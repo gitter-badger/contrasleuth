@@ -35,7 +35,7 @@ import {
 {
   let warned = false;
   Object.assign(Uint8Array.prototype, {
-    toJSON: function(): number[] {
+    toJSON: function (): number[] {
       if (!warned) {
         // eslint-disable-next-line
         console.warn(
@@ -61,10 +61,6 @@ const isByteArray = (possiblyArray: any): boolean => {
       element % 1 === 0
   );
 };
-
-// Note: Every Uint8Array must be recast to Uint8Array
-// before passing to libsodium because the Uint8Arrays
-// might be proxied by MobX.
 
 const createKeyPair = (): ContrasleuthKeyPair => {
   const {
@@ -113,9 +109,9 @@ const validatePublicHalf = ({
 }: ContrasleuthSignedPublicHalf): ContrasleuthPublicHalf | undefined => {
   if (
     sodium.crypto_sign_verify_detached(
-      new Uint8Array(publicEncryptionKeySignature),
-      new Uint8Array(publicEncryptionKey),
-      new Uint8Array(publicSigningKey)
+      publicEncryptionKeySignature,
+      publicEncryptionKey,
+      publicSigningKey
     )
   ) {
     return { publicEncryptionKey, publicSigningKey };
@@ -129,12 +125,12 @@ const calculateRecipientDigest = (
     case "unmoderated group":
       return sodium.crypto_generichash(
         sodium.crypto_generichash_BYTES,
-        new Uint8Array(recipient.data.key.key)
+        recipient.data.key.key
       );
     case "public half":
       return sodium.crypto_generichash(
         sodium.crypto_generichash_BYTES,
-        new Uint8Array(recipient.data.publicSigningKey)
+        recipient.data.publicSigningKey
       );
   }
 };
@@ -158,12 +154,12 @@ const validateMessage = (
   }
   if (
     sodium.crypto_sign_verify_detached(
-      new Uint8Array(signature),
+      signature,
       new Uint8Array([
         ...sodium.crypto_generichash(sodium.crypto_generichash_BYTES, message),
         ...recipientDigest
       ]),
-      new Uint8Array(validatedPublicHalf.publicSigningKey)
+      validatedPublicHalf.publicSigningKey
     )
   ) {
     return {
@@ -171,7 +167,7 @@ const validateMessage = (
       message,
       signatureHash: sodium.crypto_generichash(
         sodium.crypto_generichash_BYTES,
-        new Uint8Array(signature)
+        signature
       ),
       recipient
     };
@@ -185,8 +181,8 @@ const derivePublicHalf = (
     publicEncryptionKey: identity.publicEncryptionKey,
     publicSigningKey: identity.publicSigningKey,
     publicEncryptionKeySignature: sodium.crypto_sign_detached(
-      new Uint8Array(identity.publicEncryptionKey),
-      new Uint8Array(identity.privateSigningKey)
+      identity.publicEncryptionKey,
+      identity.privateSigningKey
     )
   };
 };
@@ -203,7 +199,7 @@ const createSignedMessage = (
         ...sodium.crypto_generichash(sodium.crypto_generichash_BYTES, message),
         ...recipientDigest
       ]),
-      new Uint8Array(identity.privateSigningKey)
+      identity.privateSigningKey
     ),
     publicHalf: derivePublicHalf(identity),
     message,
@@ -220,7 +216,7 @@ const createSymmetricallyEncryptedMessage = (
     ...sodium.crypto_secretbox_easy(
       JSON.stringify(message),
       nonce,
-      new Uint8Array(key.key)
+      key.key
     ),
     ...nonce
   ]);
@@ -232,13 +228,13 @@ const parseMessage = (
 ): ContrasleuthMessage | undefined => {
   type JSONParseResult =
     | {
-        type: "error";
-      }
+      type: "error";
+    }
     | {
-        type: "success";
-        // eslint-disable-next-line
-        data: any;
-      };
+      type: "success";
+      // eslint-disable-next-line
+      data: any;
+    };
 
   const parseJSON = (json: string): JSONParseResult => {
     try {
@@ -268,7 +264,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicSigningKey.length !==
-      sodium.crypto_sign_PUBLICKEYBYTES
+    sodium.crypto_sign_PUBLICKEYBYTES
   ) {
     return;
   }
@@ -278,7 +274,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKey.length !==
-      sodium.crypto_box_PUBLICKEYBYTES
+    sodium.crypto_box_PUBLICKEYBYTES
   ) {
     return;
   }
@@ -288,7 +284,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKeySignature.length !==
-      sodium.crypto_sign_BYTES
+    sodium.crypto_sign_BYTES
   ) {
     return;
   }
@@ -339,9 +335,9 @@ const decryptSymmetricallyEncryptedMessage = (
 
   return parseMessage(
     sodium.crypto_secretbox_open_easy(
-      new Uint8Array(ciphertext2),
-      new Uint8Array(nonce),
-      new Uint8Array(key.key),
+      ciphertext2,
+      nonce,
+      key.key,
       "text"
     ),
     recipient
