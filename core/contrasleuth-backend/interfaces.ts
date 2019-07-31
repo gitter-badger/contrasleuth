@@ -1,14 +1,11 @@
+import { ObservableSet, IObservableObject } from "mobx";
+
 export interface ContrasleuthKeyPair {
   type: "key pair";
   publicSigningKey: Uint8Array;
   privateSigningKey: Uint8Array;
   publicEncryptionKey: Uint8Array;
   privateEncryptionKey: Uint8Array;
-}
-
-export interface ContrasleuthIdentity {
-  name: string;
-  keyPair: ContrasleuthKeyPair;
 }
 
 export interface ContrasleuthSymmetricKey {
@@ -56,4 +53,12 @@ export interface ContrasleuthMessage {
   publicHalf: ContrasleuthPublicHalf;
   message: string;
   signatureHash: Uint8Array;
+}
+
+export interface ContrasleuthIdentity {
+  id: string;
+  name: string;
+  keyPair: ContrasleuthKeyPair;
+  inbox: ObservableSet<IObservableObject & ContrasleuthMessage>;
+  groups: ObservableSet<IObservableObject & ContrasleuthUnmoderatedGroup>;
 }

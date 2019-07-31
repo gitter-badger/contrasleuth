@@ -4,13 +4,21 @@ import instantiate, {
   AmphitheaterPeer
 } from "amphitheater";
 import { prepare, unprepare } from "bigint-json-interop";
-import { autorun, observable, ObservableSet, observe } from "mobx";
+import {
+  autorun,
+  observable,
+  ObservableSet,
+  ObservableMap,
+  observe,
+  IObservableObject
+} from "mobx";
 import publicIP from "public-ip";
 import * as fs from "fs";
 import { promisify } from "util";
 import bodyParser from "body-parser";
 import sodium from "libsodium-wrappers";
 import { writeFile } from "steno";
+import uuid from "uuid/v4";
 import {
   ContrasleuthKeyPair,
   ContrasleuthIdentity,
@@ -21,14 +29,15 @@ import {
   ContrasleuthRecipient,
   ContrasleuthSignedMessage,
   ContrasleuthMessage
-} from "contrasleuth-typedefs";
+} from "./interfaces";
 
 // Monkey-patch Uint8Array for JSON serialization.
 {
   let warned = false;
   Object.assign(Uint8Array.prototype, {
-    toJSON: function() {
+    toJSON: function(): number[] {
       if (!warned) {
+        // eslint-disable-next-line
         console.warn(
           new Error(
             "Uint8Array.prototype.toJSON has been monkey-patched. This may be intended, consult the stack trace below for details."
@@ -41,10 +50,11 @@ import {
   });
 }
 
+// eslint-disable-next-line
 const isByteArray = (possiblyArray: any): boolean => {
   if (!Array.isArray(possiblyArray)) return false;
   return possiblyArray.every(
-    element =>
+    (element): boolean =>
       Number(element) === element &&
       0 <= element &&
       element < 256 &&
@@ -74,9 +84,26 @@ const createKeyPair = (): ContrasleuthKeyPair => {
   };
 };
 
-const createIdentity = (name: string): ContrasleuthIdentity => ({
-  keyPair: createKeyPair(),
-  name
+const createIdentity = (
+  name: string
+): ContrasleuthIdentity & IObservableObject =>
+  observable({
+    keyPair: createKeyPair(),
+    name,
+    inbox: observable(new Set() as Set<
+      IObservableObject & ContrasleuthMessage
+    >),
+    groups: observable(new Set() as Set<
+      IObservableObject & ContrasleuthUnmoderatedGroup
+    >),
+    id: uuid()
+  });
+
+const createNewUnmoderatedGroup = (
+  name: string
+): ContrasleuthUnmoderatedGroup => ({
+  name,
+  key: { type: "symmetric key", key: sodium.crypto_secretbox_keygen() }
 });
 
 const validatePublicHalf = ({
@@ -209,6 +236,7 @@ const parseMessage = (
       }
     | {
         type: "success";
+        // eslint-disable-next-line
         data: any;
       };
 
@@ -236,7 +264,8 @@ const parseMessage = (
   }
   if (
     data.publicHalf.publicSigningKey.some(
-      (element: any) => typeof element !== "number"
+      // eslint-disable-next-line
+      (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicSigningKey.length !==
       sodium.crypto_sign_PUBLICKEYBYTES
@@ -245,7 +274,8 @@ const parseMessage = (
   }
   if (
     data.publicHalf.publicEncryptionKey.some(
-      (element: any) => typeof element !== "number"
+      // eslint-disable-next-line
+      (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKey.length !==
       sodium.crypto_box_PUBLICKEYBYTES
@@ -254,7 +284,8 @@ const parseMessage = (
   }
   if (
     data.publicHalf.publicEncryptionKeySignature.some(
-      (element: any) => typeof element !== "number"
+      // eslint-disable-next-line
+      (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKeySignature.length !==
       sodium.crypto_sign_BYTES
@@ -331,89 +362,81 @@ const peers: ObservableSet<AmphitheaterPeer> = observable(
   ])
 );
 const addresses: ObservableSet<string> = observable(new Set() as Set<string>);
-const groups: ObservableSet<ContrasleuthUnmoderatedGroup> = observable(
-  new Set() as Set<ContrasleuthUnmoderatedGroup>
-);
-const identities: ObservableSet<ContrasleuthIdentity> = observable(
-  new Set() as Set<ContrasleuthIdentity>
-);
-const inbox: ObservableSet<ContrasleuthMessage> = observable(new Set() as Set<
-  ContrasleuthMessage
->);
-
+const identities: ObservableSet<
+  IObservableObject & ContrasleuthIdentity
+> = observable(new Set() as Set<IObservableObject & ContrasleuthIdentity>);
 interface MapDerivationResult<K, V> {
-  map: Map<K, V>;
+  map: ObservableMap<K, V>;
   stop: () => void;
 }
 
 const deriveMapFromObservableSet = <K, V>(
-  set: ObservableSet<V>,
+  set: ObservableSet<IObservableObject & V>,
   extractKey: (element: V) => K
 ): MapDerivationResult<K, V> => {
-  const map: Map<K, V> = new Map();
+  const map: ObservableMap<K, V> = observable(new Map());
 
-  set.forEach(
-    (element): void => {
-      map.set(extractKey(element), element);
-    }
-  );
+  set.forEach((element): void => {
+    map.set(extractKey(element), element);
+  });
 
-  const unsubscribe = observe(
-    set,
-    (change): void => {
-      if (change.type === "add") {
-        map.set(extractKey(change.newValue), change.newValue);
-      } else if (change.type === "delete") {
-        map.delete(extractKey(change.oldValue));
-      }
+  const unsubscribe = observe(set, (change): void => {
+    if (change.type === "add") {
+      map.set(extractKey(change.newValue), change.newValue);
+    } else if (change.type === "delete") {
+      map.delete(extractKey(change.oldValue));
     }
-  );
+  });
   return { map, stop: unsubscribe };
 };
 
-const deriveInbox = () => {
-  const inboxMap = deriveMapFromObservableSet(inbox, message =>
-    Buffer.from(message.signatureHash).toString()
+const deriveInbox = (identity: ContrasleuthIdentity): (() => void) => {
+  const { inbox } = identity;
+  const { map: inboxMap, stop: stopDerivingMap } = deriveMapFromObservableSet(
+    inbox,
+    (message): string => Buffer.from(message.signatureHash).toString()
   );
 
-  const parseObject = (object: string) =>
-    [...groups]
-      .map(group =>
+  const parseObject = (object: string): ContrasleuthMessage | undefined =>
+    [...identity.groups]
+      .map((group): ContrasleuthMessage | undefined =>
         decryptSymmetricallyEncryptedMessage(
           group.key,
           new Uint8Array(Buffer.from(object, "base64")),
           { type: "unmoderated group", data: group }
         )
       )
-      .find(message => message !== undefined);
+      .find((message): boolean => message !== undefined);
 
-  const addMessageToInbox = (message: ContrasleuthMessage | undefined) => {
+  const addMessageToInbox = (
+    message: ContrasleuthMessage | undefined
+  ): void => {
     if (message === undefined) return;
-    if (inboxMap.map.has(Buffer.from(message.signatureHash).toString())) return;
-    inbox.add(message);
+    if (inboxMap.has(Buffer.from(message.signatureHash).toString())) return;
+    inbox.add(observable(message));
   };
 
-  const initialParse = () => {
-    objects.forEach(object => addMessageToInbox(parseObject(object.payload)));
+  const initialParse = (): void => {
+    objects.forEach((object): void =>
+      addMessageToInbox(parseObject(object.payload))
+    );
   };
 
-  const reactiveParse = () => {
-    observe(objects, change => {
+  const reactiveParse = (): (() => void) => {
+    return observe(objects, (change): void => {
       if (change.type !== "add") return;
       addMessageToInbox(parseObject(change.newValue.payload));
     });
   };
 
   initialParse();
-  reactiveParse();
-};
+  const stopReactivelyParsingObjects = reactiveParse();
 
-const findUnmoderatedGroup = (
-  key: Uint8Array
-): ContrasleuthUnmoderatedGroup | undefined =>
-  [...groups].find(
-    group => JSON.stringify(group.key.key) === JSON.stringify(key)
-  );
+  return (): void => {
+    stopDerivingMap();
+    stopReactivelyParsingObjects();
+  };
+};
 
 const readFile = promisify(fs.readFile);
 
@@ -421,22 +444,45 @@ const JSON_FILE = "contrasleuth.json";
 const AMPHITHEATER_PORT = 4010;
 const API_SERVER_PORT = 4011;
 
-(async () => {
+(async (): Promise<void> => {
   await sodium.ready;
+
+  // JSON doesn't support ES6 Sets.
+  // These interfaces serves as intermediate data types before getting
+  // converted to ContrasleuthIdentity proper.
+  interface DeserializedKeyPair {
+    type: "key pair";
+    publicSigningKey: number[];
+    privateSigningKey: number[];
+    publicEncryptionKey: number[];
+    privateEncryptionKey: number[];
+  }
+
+  interface DeserializedIdentity {
+    id: string;
+    name: string;
+    keyPair: DeserializedKeyPair;
+    inbox: ContrasleuthMessage[];
+    groups: ContrasleuthUnmoderatedGroup[];
+  }
 
   const {
     objects: objectArray,
     peers: peerArray,
-    groups: groupArray,
-    identities: identityArray,
-    inbox: inboxArray
-  } = (await (async () => {
+    identities: identityArray
+  } = (await (async (): Promise<{
+    objects: AmphitheaterObject[];
+    peers: AmphitheaterPeer[];
+    identities: DeserializedIdentity[];
+  }> => {
     if (fs.existsSync(JSON_FILE)) {
       const json = (await readFile(JSON_FILE)).toString();
       try {
         return unprepare(JSON.parse(json));
       } catch (error) {
+        // eslint-disable-next-line
         console.log("contrasleuth.json contains malformed data. Ignoring.");
+        // eslint-disable-next-line
         console.error(error);
       }
     }
@@ -444,28 +490,55 @@ const API_SERVER_PORT = 4011;
     return {
       objects: [],
       peers: [],
-      groups: [],
-      identities: [],
-      inbox: []
+      identities: []
     };
   })()) as {
     objects: AmphitheaterObject[];
     peers: AmphitheaterPeer[];
-    groups: ContrasleuthUnmoderatedGroup[];
-    identities: ContrasleuthIdentity[];
-    inbox: ContrasleuthMessage[];
+    identities: DeserializedIdentity[];
   };
 
-  Promise.all([publicIP.v4(), publicIP.v6()]).then(([ipv4, ipv6]) => {
+  Promise.all([publicIP.v4(), publicIP.v6()]).then(([ipv4, ipv6]): void => {
     addresses.add(ipv4 + ":" + AMPHITHEATER_PORT);
     addresses.add("[" + ipv6 + "]:" + AMPHITHEATER_PORT);
   });
 
-  objectArray.forEach(object => objects.add(object));
-  peerArray.forEach(peer => peers.add(peer));
-  groupArray.forEach(group => groups.add(group));
-  identityArray.forEach(identity => identities.add(identity));
-  inboxArray.forEach(message => inbox.add(message));
+  objectArray.forEach((object): void => {
+    objects.add(object);
+  });
+  peerArray.forEach((peer): void => {
+    peers.add(peer);
+  });
+  identityArray.forEach((identity): void => {
+    identities.add(
+      observable({
+        ...identity,
+        inbox: observable(
+          new Set(
+            identity.inbox.map((message): ContrasleuthMessage &
+              IObservableObject => observable(message))
+          )
+        ),
+        groups: observable(
+          new Set(
+            identity.groups.map((group): ContrasleuthUnmoderatedGroup &
+              IObservableObject => observable(group))
+          )
+        ),
+        keyPair: {
+          ...identity.keyPair,
+          publicSigningKey: new Uint8Array(identity.keyPair.publicSigningKey),
+          privateSigningKey: new Uint8Array(identity.keyPair.privateSigningKey),
+          publicEncryptionKey: new Uint8Array(
+            identity.keyPair.publicEncryptionKey
+          ),
+          privateEncryptionKey: new Uint8Array(
+            identity.keyPair.privateEncryptionKey
+          )
+        }
+      })
+    );
+  });
 
   const { server: amphitheaterServer, createObject } = await instantiate(
     objects,
@@ -473,227 +546,276 @@ const API_SERVER_PORT = 4011;
     addresses
   );
 
-  await new Promise(resolve => {
+  await new Promise((resolve): void => {
     amphitheaterServer
       .listen(AMPHITHEATER_PORT)
-      .on("error", () => {
+      .on("error", (): void => {
+        // eslint-disable-next-line
         console.log(
           `Port ${AMPHITHEATER_PORT} (Amphitheater server) not available. Contrasleuth failed to start.`
         );
         process.exit(1);
       })
-      .on("listening", () => {
+      .on("listening", (): void => {
         resolve();
       });
   });
 
-  autorun(() => {
+  autorun((): void => {
     const stringified = JSON.stringify(
       prepare({
         objects: [...objects],
         peers: [...peers],
-        groups: [...groups],
-        identities: [...identities],
-        inbox: [...inbox]
+        // eslint-disable-next-line
+        identities: [...identities].map((identity): any => ({
+          ...identity,
+          inbox: [...identity.inbox],
+          groups: [...identity.groups]
+        }))
       })
     );
-    writeFile(JSON_FILE, stringified, error => {
+    writeFile(JSON_FILE, stringified, (error): void => {
       if (error !== null && error !== undefined) throw error;
     });
-  });
-
-  deriveInbox();
-
-  const createNewUnmoderatedGroup = (
-    name: string
-  ): ContrasleuthUnmoderatedGroup => ({
-    name,
-    key: { type: "symmetric key", key: sodium.crypto_secretbox_keygen() }
   });
 
   const app = express();
   app.use(bodyParser.json());
 
-  app.post("/create-identity", (request, response) => {
+  app.post("/create-identity", (request, response): void => {
     const name = request.body.name;
     if (typeof name !== "string") {
       response.sendStatus(400);
       return;
     }
-    identities.add(createIdentity(name));
+    identities.add(observable(createIdentity(name)));
     response.sendStatus(200);
   });
 
-  app.get("/identities", (_request, response) => {
-    response.send([...identities]);
+  app.get("/identities", (_request, response): void => {
+    response.send(
+      [...identities].map(({ id, name, keyPair }): {
+        id: string;
+        name: string;
+        keyPair: ContrasleuthKeyPair;
+      } => ({ id, name, keyPair }))
+    );
   });
 
-  app.post("/create-unmoderated-group", (request, response) => {
-    const name = request.body.name;
-    if (typeof name !== "string") {
-      response.sendStatus(400);
-      return;
-    }
+  interface IdentityHandler {
+    router: express.Router;
+    stop: () => void;
+  }
 
-    groups.add(createNewUnmoderatedGroup(name));
-    response.sendStatus(200);
-  });
+  const handleIdentitySpecificRoutes = (
+    identity: IObservableObject & ContrasleuthIdentity
+  ): IdentityHandler => {
+    const { groups, inbox } = identity;
 
-  app.get("/groups", (_request, response) => {
-    response.send([...groups]);
-  });
+    const router = express.Router();
 
-  app.post("/join-unmoderated-group", (request, response) => {
-    const name = request.body.name;
-    if (typeof name !== "string") {
-      response.sendStatus(400);
-      return;
-    }
+    const {
+      map: groupMap,
+      stop: stopDerivingGroupMap
+    } = deriveMapFromObservableSet(groups, (group): string => {
+      return JSON.stringify(group.key.key);
+    });
 
-    if (!isByteArray(request.body.key)) {
-      response.sendStatus(400);
-      return;
-    }
-    const key = new Uint8Array(request.body.key);
-    groups.add({ name, key: { type: "symmetric key", key } });
+    const stopDerivingInbox = deriveInbox(identity);
 
-    response.sendStatus(200);
-  });
+    const findUnmoderatedGroup = (
+      key: Uint8Array
+    ): ContrasleuthUnmoderatedGroup | undefined =>
+      groupMap.get(JSON.stringify(key));
 
-  app.post("/rename-unmoderated-group", (request, response) => {
-    const name = request.body.name;
-    if (typeof name !== "string") {
-      response.sendStatus(400);
-      return;
-    }
+    router.post("/rename", (request, response): void => {
+      const name = request.body.name;
+      if (typeof name !== "string") {
+        response.sendStatus(400);
+        return;
+      }
+      identity.name = name;
+      response.sendStatus(200);
+    });
 
-    if (!isByteArray(request.body.key)) {
-      response.sendStatus(400);
-      return;
-    }
+    router.post("/delete", (_request, response): void => {
+      identities.delete(identity);
+      response.sendStatus(200);
+    });
 
-    const key = new Uint8Array(request.body.key);
-    const group = findUnmoderatedGroup(key);
-    if (group === undefined) {
-      response.sendStatus(404);
-      return;
-    }
+    router.post("/create-unmoderated-group", (request, response): void => {
+      const name = request.body.name;
+      if (typeof name !== "string") {
+        response.sendStatus(400);
+        return;
+      }
 
-    group.name = name;
-    response.sendStatus(200);
-  });
+      groups.add(observable(createNewUnmoderatedGroup(name)));
+      response.sendStatus(200);
+    });
 
-  app.post("/leave-unmoderated-group", (request, response) => {
-    if (!isByteArray(request.body.key)) {
-      response.sendStatus(400);
-      return;
-    }
+    router.get("/groups", (_request, response): void => {
+      response.send([...groups]);
+    });
 
-    const key = new Uint8Array(request.body.key);
-    const group = findUnmoderatedGroup(key);
-    if (group === undefined) {
-      response.sendStatus(404);
-      return;
-    }
+    router.post("/join-unmoderated-group", (request, response): void => {
+      const name = request.body.name;
+      if (typeof name !== "string") {
+        response.sendStatus(400);
+        return;
+      }
 
-    groups.delete(group);
-    response.sendStatus(200);
-  });
+      if (!isByteArray(request.body.key)) {
+        response.sendStatus(400);
+        return;
+      }
+      const key = new Uint8Array(request.body.key);
+      groups.add(observable({ name, key: { type: "symmetric key", key } }));
 
-  app.post("/create-post-in-unmoderated-group", async (request, response) => {
-    const content = request.body.content;
-    const publicSigningKey = request.body.publicSigningKey;
-    const privateSigningKey = request.body.privateSigningKey;
-    const publicEncryptionKey = request.body.publicEncryptionKey;
-    const privateEncryptionKey = request.body.privateEncryptionKey;
+      response.sendStatus(200);
+    });
 
-    if (
-      typeof content !== "string" ||
-      !isByteArray(request.body.key) ||
-      isNaN(request.body.timeToLive)
-    ) {
-      response.sendStatus(400);
-      return;
-    }
+    router.post("/rename-unmoderated-group", (request, response): void => {
+      const name = request.body.name;
+      if (typeof name !== "string") {
+        response.sendStatus(400);
+        return;
+      }
 
-    const key = new Uint8Array(request.body.key);
+      if (!isByteArray(request.body.key)) {
+        response.sendStatus(400);
+        return;
+      }
 
-    if (
-      ![
-        publicEncryptionKey,
-        privateEncryptionKey,
-        publicSigningKey,
-        privateSigningKey
-      ].every(isByteArray)
-    ) {
-      response.sendStatus(400);
-      return;
-    }
+      const key = new Uint8Array(request.body.key);
+      const group = findUnmoderatedGroup(key);
+      if (group === undefined) {
+        response.sendStatus(404);
+        return;
+      }
 
-    if (publicEncryptionKey.length !== sodium.crypto_box_PUBLICKEYBYTES) {
-      response.sendStatus(400);
-      return;
-    }
+      group.name = name;
+      response.sendStatus(200);
+    });
 
-    if (privateEncryptionKey.length !== sodium.crypto_box_SECRETKEYBYTES) {
-      response.sendStatus(400);
-      return;
-    }
+    router.post("/leave-unmoderated-group", (request, response): void => {
+      if (!isByteArray(request.body.key)) {
+        response.sendStatus(400);
+        return;
+      }
 
-    if (publicSigningKey.length !== sodium.crypto_sign_PUBLICKEYBYTES) {
-      response.sendStatus(400);
-      return;
-    }
+      const key = new Uint8Array(request.body.key);
+      const group = findUnmoderatedGroup(key);
+      if (group === undefined) {
+        response.sendStatus(404);
+        return;
+      }
 
-    if (privateSigningKey.length !== sodium.crypto_sign_SECRETKEYBYTES) {
-      response.sendStatus(400);
-      return;
-    }
+      groups.delete(group);
+      response.sendStatus(200);
+    });
 
-    const identity: ContrasleuthKeyPair = {
-      type: "key pair",
-      publicEncryptionKey: new Uint8Array(publicEncryptionKey),
-      privateEncryptionKey: new Uint8Array(privateEncryptionKey),
-      publicSigningKey: new Uint8Array(publicSigningKey),
-      privateSigningKey: new Uint8Array(privateSigningKey)
-    };
+    router.post(
+      "/create-post-in-unmoderated-group",
+      async (request, response): Promise<void> => {
+        const content = request.body.content;
 
-    const timeToLive = BigInt(request.body.timeToLive);
+        if (
+          typeof content !== "string" ||
+          !isByteArray(request.body.key) ||
+          isNaN(request.body.timeToLive)
+        ) {
+          response.sendStatus(400);
+          return;
+        }
 
-    const group = findUnmoderatedGroup(key);
-    if (group === undefined) {
-      response.sendStatus(400);
-      return;
-    }
-    objects.add(
-      await createObject(
-        Buffer.from(
-          createSymmetricallyEncryptedMessage(
-            { key, type: "symmetric key" },
-            createSignedMessage(identity, content, {
-              type: "unmoderated group",
-              data: group
-            })
+        const key = new Uint8Array(request.body.key);
+
+        const { keyPair } = identity;
+
+        const timeToLive = BigInt(request.body.timeToLive);
+
+        const group = findUnmoderatedGroup(key);
+        if (group === undefined) {
+          response.sendStatus(400);
+          return;
+        }
+        objects.add(
+          await createObject(
+            Buffer.from(
+              createSymmetricallyEncryptedMessage(
+                { key, type: "symmetric key" },
+                createSignedMessage(keyPair, content, {
+                  type: "unmoderated group",
+                  data: group
+                })
+              )
+            ).toString("base64"),
+            timeToLive
           )
-        ).toString("base64"),
-        timeToLive
-      )
+        );
+
+        response.sendStatus(200);
+      }
     );
 
-    response.sendStatus(200);
+    router.get("/inbox", (_request, response): void => {
+      response.send([...inbox]);
+    });
+
+    return {
+      router,
+      stop: (): void => {
+        stopDerivingGroupMap();
+        stopDerivingInbox();
+      }
+    };
+  };
+
+  const identityHandlerMap = new Map<string, IdentityHandler>();
+
+  app.use("/:id/", (request, response, next): void => {
+    const id = request.params.id;
+    if (typeof id !== "string") {
+      response.sendStatus(400);
+      return;
+    }
+    const identityHandler = identityHandlerMap.get(id);
+    if (identityHandler === undefined) {
+      response.sendStatus(404);
+      return;
+    }
+    identityHandler.router(request, response, next);
   });
 
-  app.get("/inbox", (_request, response) => {
-    response.send(JSON.stringify([...inbox]));
+  identities.forEach((identity): void => {
+    identityHandlerMap.set(identity.id, handleIdentitySpecificRoutes(identity));
+  });
+
+  observe(identities, (change): void => {
+    if (change.type === "add") {
+      const identity = change.newValue;
+      const handler = handleIdentitySpecificRoutes(identity);
+      identityHandlerMap.set(identity.id, handler);
+    }
+    if (change.type === "delete") {
+      const identity = change.oldValue;
+      const handler = identityHandlerMap.get(identity.id);
+      if (handler === undefined) return;
+      handler.stop();
+      identityHandlerMap.delete(identity.id);
+    }
   });
 
   app
-    .listen(API_SERVER_PORT, () => {
+    .listen(API_SERVER_PORT, (): void => {
+      // eslint-disable-next-line
       console.log(
         `Contrasleuth is working. Port ${AMPHITHEATER_PORT} (Amphitheater server) and ${API_SERVER_PORT} (Contrasleuth API server) are both ready.`
       );
     })
-    .on("error", () => {
+    .on("error", (): void => {
+      // eslint-disable-next-line
       console.log(
         `Port ${API_SERVER_PORT} (Contrasleuth API server) not available. Contrasleuth failed to start.`
       );
