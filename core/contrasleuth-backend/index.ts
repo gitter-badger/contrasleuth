@@ -12,7 +12,6 @@ import {
   observe,
   IObservableObject
 } from "mobx";
-import publicIP from "public-ip";
 import * as fs from "fs";
 import { promisify } from "util";
 import bodyParser from "body-parser";
@@ -30,12 +29,16 @@ import {
   ContrasleuthSignedMessage,
   ContrasleuthMessage
 } from "./interfaces";
+import externalIP from "external-ip";
+import { isV4Format } from "ip";
+
+const getIP = externalIP();
 
 // Monkey-patch Uint8Array for JSON serialization.
 {
   let warned = false;
   Object.assign(Uint8Array.prototype, {
-    toJSON: function (): number[] {
+    toJSON: function(): number[] {
       if (!warned) {
         // eslint-disable-next-line
         console.warn(
@@ -213,11 +216,7 @@ const createSymmetricallyEncryptedMessage = (
 ): Uint8Array => {
   const nonce = sodium.randombytes_buf(sodium.crypto_box_NONCEBYTES);
   return new Uint8Array([
-    ...sodium.crypto_secretbox_easy(
-      JSON.stringify(message),
-      nonce,
-      key.key
-    ),
+    ...sodium.crypto_secretbox_easy(JSON.stringify(message), nonce, key.key),
     ...nonce
   ]);
 };
@@ -228,13 +227,13 @@ const parseMessage = (
 ): ContrasleuthMessage | undefined => {
   type JSONParseResult =
     | {
-      type: "error";
-    }
+        type: "error";
+      }
     | {
-      type: "success";
-      // eslint-disable-next-line
-      data: any;
-    };
+        type: "success";
+        // eslint-disable-next-line
+        data: any;
+      };
 
   const parseJSON = (json: string): JSONParseResult => {
     try {
@@ -264,7 +263,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicSigningKey.length !==
-    sodium.crypto_sign_PUBLICKEYBYTES
+      sodium.crypto_sign_PUBLICKEYBYTES
   ) {
     return;
   }
@@ -274,7 +273,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKey.length !==
-    sodium.crypto_box_PUBLICKEYBYTES
+      sodium.crypto_box_PUBLICKEYBYTES
   ) {
     return;
   }
@@ -284,7 +283,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKeySignature.length !==
-    sodium.crypto_sign_BYTES
+      sodium.crypto_sign_BYTES
   ) {
     return;
   }
@@ -334,12 +333,7 @@ const decryptSymmetricallyEncryptedMessage = (
   );
 
   return parseMessage(
-    sodium.crypto_secretbox_open_easy(
-      ciphertext2,
-      nonce,
-      key.key,
-      "text"
-    ),
+    sodium.crypto_secretbox_open_easy(ciphertext2, nonce, key.key, "text"),
     recipient
   );
 };
@@ -494,9 +488,19 @@ const API_SERVER_PORT = 4011;
     identities: DeserializedIdentity[];
   };
 
-  Promise.all([publicIP.v4(), publicIP.v6()]).then(([ipv4, ipv6]): void => {
-    addresses.add(ipv4 + ":" + AMPHITHEATER_PORT);
-    addresses.add("[" + ipv6 + "]:" + AMPHITHEATER_PORT);
+  getIP((error, ip): void => {
+    if (error !== null && error !== undefined) {
+      // eslint-disable-next-line no-console
+      console.log(
+        "Failed to retrieve your public IP address. This error usually means that you are not connected to the Internet, but there may be other causes as well (e.g. Internet censorship)."
+      );
+      return;
+    }
+    if (isV4Format(ip)) {
+      addresses.add(`${ip}:${AMPHITHEATER_PORT}`);
+    } else {
+      addresses.add(`[${ip}]:${AMPHITHEATER_PORT}`);
+    }
   });
 
   objectArray.forEach((object): void => {
