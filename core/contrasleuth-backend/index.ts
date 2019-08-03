@@ -1,8 +1,7 @@
 try {
   require("worker_threads");
 } catch {
-  // eslint-disable-next-line
-  console.error(
+  process.stdout.write(
     "You forgot to pass the --experimental-worker flag to node. Contrasleuth requires worker_threads to work."
   );
   process.exit(1);
@@ -44,23 +43,11 @@ import { isV4Format } from "ip";
 const getIP = externalIP();
 
 // Monkey-patch Uint8Array for JSON serialization.
-{
-  let warned = false;
-  Object.assign(Uint8Array.prototype, {
-    toJSON: function(): number[] {
-      if (!warned) {
-        // eslint-disable-next-line
-        console.warn(
-          new Error(
-            "Uint8Array.prototype.toJSON has been monkey-patched. This may be intended, consult the stack trace below for details."
-          )
-        );
-        warned = true;
-      }
-      return [...((this as unknown) as Uint8Array)];
-    }
-  });
-}
+Object.assign(Uint8Array.prototype, {
+  toJSON: function(): number[] {
+    return [...((this as unknown) as Uint8Array)];
+  }
+});
 
 // eslint-disable-next-line
 const isByteArray = (possiblyArray: any): boolean => {
@@ -447,15 +434,16 @@ const parseArguments = (): {
   const cliArguments = process.argv.slice(2);
 
   if (cliArguments.length === 1 && ["--help", "-h"].includes(cliArguments[0])) {
-    // eslint-disable-next-line
-    console.log(
-      "Usage: contrasleuth [options]\n",
-      "\n",
-      "Options:\n",
-      "  --help\tPrint this message.\n",
-      "  --json-file\tPath to the JSON file for Contrasleuth to persist its data. Default: contrasleuth.json\n",
-      "  --amphitheater-port\tPort or Unix socket for Amphitheater. Default: 4010\n",
-      "  --api-server-port\tPort or Unix socket for Contrasleuth API server. Default: 4011\n"
+    process.stdout.write(
+      [
+        "Usage: contrasleuth [options]\n",
+        "\n",
+        "Options:\n",
+        "  --help\tPrint this message.\n",
+        "  --json-file\tPath to the JSON file for Contrasleuth to persist its data. Default: contrasleuth.json\n",
+        "  --amphitheater-port\tPort or Unix socket for Amphitheater. Default: 4010\n",
+        "  --api-server-port\tPort or Unix socket for Contrasleuth API server. Default: 4011\n"
+      ].join("")
     );
     process.exit(0);
   }
@@ -468,8 +456,9 @@ const parseArguments = (): {
     if (cliArguments[0] === "--json-file") {
       cliArguments.shift();
       if (cliArguments[0] === undefined) {
-        // eslint-disable-next-line
-        console.error("No argument supplied for --json-file option. Exiting.");
+        process.stdout.write(
+          "No argument supplied for --json-file option. Exiting.\n"
+        );
         process.exit(1);
       }
       JSON_FILE = cliArguments[0];
@@ -479,9 +468,8 @@ const parseArguments = (): {
     if (cliArguments[0] === "--amphitheater-port") {
       cliArguments.shift();
       if (cliArguments[0] === undefined) {
-        // eslint-disable-next-line
-        console.error(
-          "No argument supplied for --amphitheater-port option. Exiting."
+        process.stdout.write(
+          "No argument supplied for --amphitheater-port option. Exiting.\n"
         );
         process.exit(1);
       }
@@ -494,9 +482,8 @@ const parseArguments = (): {
     if (cliArguments[0] === "--api-server-port") {
       cliArguments.shift();
       if (cliArguments[0] === undefined) {
-        // eslint-disable-next-line
-        console.error(
-          "No argument supplied for --api-server-port option. Exiting."
+        process.stdout.write(
+          "No argument supplied for --api-server-port option. Exiting.\n"
         );
         process.exit(1);
       }
@@ -506,8 +493,7 @@ const parseArguments = (): {
       cliArguments.shift();
       continue;
     }
-    // eslint-disable-next-line
-    console.error("Bad option: ", cliArguments[0], ". Exiting.");
+    process.stdout.write("Bad option: " + cliArguments[0] + ". Exiting.\n");
   }
 
   return { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT };
@@ -551,8 +537,9 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
       try {
         return unprepare(JSON.parse(json));
       } catch (error) {
-        // eslint-disable-next-line
-        console.log("contrasleuth.json contains malformed data. Ignoring.");
+        process.stdout.write(
+          "contrasleuth.json contains malformed data. Ignoring.\n"
+        );
         // eslint-disable-next-line
         console.error(error);
       }
@@ -581,12 +568,13 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
           getIP((error, ip): void => {
             resolve();
             if (error !== null && error !== undefined) {
-              // eslint-disable-next-line no-console
-              console.log(
-                "Failed to retrieve your public IP address. This error usually means that you are not connected to the Internet, but there may be other causes as well (e.g. Internet censorship).\n",
-                "Next attempt in ",
-                IP_RETRIEVAL_INTERVAL / 1000,
-                "s."
+              process.stdout.write(
+                [
+                  "Failed to retrieve your public IP address. This error usually means that you are not connected to the Internet, but there may be other causes as well (e.g. Internet censorship).\n",
+                  "Next attempt in ",
+                  IP_RETRIEVAL_INTERVAL / 1000,
+                  "s.\n"
+                ].join("")
               );
               return;
             }
@@ -655,9 +643,8 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
     amphitheaterServer
       .listen(AMPHITHEATER_PORT)
       .on("error", (): void => {
-        // eslint-disable-next-line
-        console.log(
-          `Port ${AMPHITHEATER_PORT} (Amphitheater server) not available. Contrasleuth failed to start.`
+        process.stdout.write(
+          `Port ${AMPHITHEATER_PORT} (Amphitheater server) not available. Contrasleuth failed to start.\n`
         );
         process.exit(1);
       })
@@ -914,15 +901,14 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
 
   app
     .listen(API_SERVER_PORT, (): void => {
-      // eslint-disable-next-line
-      console.log(
-        `Contrasleuth is working. Port ${AMPHITHEATER_PORT} (Amphitheater server) and ${API_SERVER_PORT} (Contrasleuth API server) are both ready.`
+      process.stdout.write(
+        `Contrasleuth is working. Port ${AMPHITHEATER_PORT} (Amphitheater server) and ${API_SERVER_PORT} (Contrasleuth API server) are both ready.\n`
       );
     })
     .on("error", (): void => {
-      // eslint-disable-next-line
-      console.log(
-        `Port ${API_SERVER_PORT} (Contrasleuth API server) not available. Contrasleuth failed to start.`
+      process.stdout.write(
+        `Port ${API_SERVER_PORT} (Contrasleuth API server) not available. Contrasleuth failed to start.\n`
       );
+      process.exit(1);
     });
 })();
