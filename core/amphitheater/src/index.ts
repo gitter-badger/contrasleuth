@@ -86,7 +86,8 @@ const instantiate = async (
   objects: ObservableSet<AmphitheaterObject>,
   peers: ObservableSet<AmphitheaterPeer>,
   addresses: ObservableSet<string>,
-  agent?: http.Agent
+  agent?: http.Agent,
+  silenceNetworkingErrors = false
 ): Promise<Server> => {
   await sodium.ready;
 
@@ -329,6 +330,7 @@ const instantiate = async (
   }, 1000);
 
   const events = new EventEmitter();
+  events.setMaxListeners(Infinity);
 
   const connectedPeers: Set<string> = new Set();
 
@@ -337,12 +339,17 @@ const instantiate = async (
       return;
     }
 
+    const handleNetworkingError = (error: any) => {
+      if (error.isAxiosError && silenceNetworkingErrors) return;
+      console.error(error);
+    };
+
     const peerEvents = new EventEmitter();
     const cleanup = (): void => {
       connectedPeers.delete(peer.address);
       peerEvents.emit("stop");
     };
-    events.on("stop", cleanup);
+    events.once("stop", cleanup);
 
     const peerSocket = (): void => {
       const socketURL = new url.URL("ws://placeholder.hostname/peers");
@@ -355,7 +362,7 @@ const instantiate = async (
       socket.on("close", cleanup);
       socket.on("error", cleanup);
 
-      peerEvents.on(
+      peerEvents.once(
         "stop",
         (): void => {
           socket.off("close", cleanup);
@@ -409,7 +416,7 @@ const instantiate = async (
       socket.on("close", cleanup);
       socket.on("error", cleanup);
 
-      peerEvents.on(
+      peerEvents.once(
         "stop",
         (): void => {
           socket.off("close", cleanup);
@@ -469,7 +476,7 @@ const instantiate = async (
                   objects.add(object);
                 }
               )
-              .catch(console.error);
+              .catch(handleNetworkingError);
           }
         }
       );
@@ -491,6 +498,11 @@ const instantiate = async (
           objectURL.search = "";
           axios.get(objectURL.toString(), { httpAgent: agent }).catch(
             (error): void => {
+              if (!error.isAxiosError) {
+                console.error(error);
+                return;
+              }
+
               if (error.response) {
                 if (error.response.status === 404) {
                   const postURL = new url.URL(
@@ -503,14 +515,14 @@ const instantiate = async (
                     .post(postURL.toString(), prepare(change.newValue), {
                       httpAgent: agent
                     })
-                    .catch(console.error);
+                    .catch(handleNetworkingError);
 
                   return;
                 }
               }
 
               // eslint-disable-next-line no-console
-              console.error(error);
+              handleNetworkingError(error);
             }
           );
         }
@@ -528,12 +540,12 @@ const instantiate = async (
             .post(postURL.toString(), prepare(change.newValue), {
               httpAgent: agent
             })
-            .catch(console.error);
+            .catch(handleNetworkingError);
         }
       }
     );
 
-    peerEvents.on(
+    peerEvents.once(
       "stop",
       (): void => {
         unsubscribeObjects();

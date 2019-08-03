@@ -1,3 +1,10 @@
+try {
+  require("worker_threads");
+} catch {
+  // eslint-disable-next-line
+  console.error("You forgot to pass the --experimental-worker flag to node. Contrasleuth requires worker_threads to work.");
+  process.exit(1);
+}
 import express from "express";
 import instantiate, {
   AmphitheaterObject,
@@ -430,9 +437,83 @@ const deriveInbox = (identity: ContrasleuthIdentity): (() => void) => {
 
 const readFile = promisify(fs.readFile);
 
-const JSON_FILE = "contrasleuth.json";
-const AMPHITHEATER_PORT = 4010;
-const API_SERVER_PORT = 4011;
+const parseArguments = (): {
+  JSON_FILE: string;
+  AMPHITHEATER_PORT: number | string;
+  API_SERVER_PORT: number | string;
+} => {
+  const cliArguments = process.argv.slice(2);
+
+  if (cliArguments.length === 1 && ["--help", "-h"].includes(cliArguments[0])) {
+    // eslint-disable-next-line
+    console.log(
+      "Usage: contrasleuth [options]\n",
+      "\n",
+      "Options:\n",
+      "  --help\tPrint this message.\n",
+      "  --json-file\tPath to the JSON file for Contrasleuth to persist its data. Default: contrasleuth.json\n",
+      "  --amphitheater-port\tPort or Unix socket for Amphitheater. Default: 4010\n",
+      "  --api-server-port\tPort or Unix socket for Contrasleuth API server. Default: 4011\n"
+    );
+    process.exit(0);
+  }
+
+  let JSON_FILE = "contrasleuth.json";
+  let AMPHITHEATER_PORT: string | number = 4010;
+  let API_SERVER_PORT: string | number = 4011;
+
+  while (cliArguments.length > 0) {
+    if (cliArguments[0] === "--json-file") {
+      cliArguments.shift();
+      if (cliArguments[0] === undefined) {
+        // eslint-disable-next-line
+        console.error(
+          "No argument supplied for --json-file option. Exiting."
+        );
+        process.exit(1);
+      }
+      JSON_FILE = cliArguments[0];
+      cliArguments.shift();
+      continue;
+    }
+    if (cliArguments[0] === "--amphitheater-port") {
+      cliArguments.shift();
+      if (cliArguments[0] === undefined) {
+        // eslint-disable-next-line
+        console.error(
+          "No argument supplied for --amphitheater-port option. Exiting."
+        );
+        process.exit(1);
+      }
+      AMPHITHEATER_PORT = isNaN(Number(cliArguments[0]))
+        ? cliArguments[0]
+        : Number(cliArguments[0]);
+      cliArguments.shift();
+      continue;
+    }
+    if (cliArguments[0] === "--api-server-port") {
+      cliArguments.shift();
+      if (cliArguments[0] === undefined) {
+        // eslint-disable-next-line
+        console.error(
+          "No argument supplied for --api-server-port option. Exiting."
+        );
+        process.exit(1);
+      }
+      API_SERVER_PORT = isNaN(Number(cliArguments[0]))
+        ? cliArguments[0]
+        : Number(cliArguments[0]);
+      cliArguments.shift();
+      continue;
+    }
+    // eslint-disable-next-line
+    console.error("Bad option: ", cliArguments[0], ". Exiting.");
+  }
+
+  return { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT };
+};
+
+const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
 
 (async (): Promise<void> => {
   await sodium.ready;
@@ -543,7 +624,9 @@ const API_SERVER_PORT = 4011;
   const { server: amphitheaterServer, createObject } = await instantiate(
     objects,
     peers,
-    addresses
+    addresses,
+    undefined,
+    true
   );
 
   await new Promise((resolve): void => {
