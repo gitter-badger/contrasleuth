@@ -2,7 +2,9 @@ try {
   require("worker_threads");
 } catch {
   // eslint-disable-next-line
-  console.error("You forgot to pass the --experimental-worker flag to node. Contrasleuth requires worker_threads to work.");
+  console.error(
+    "You forgot to pass the --experimental-worker flag to node. Contrasleuth requires worker_threads to work."
+  );
   process.exit(1);
 }
 import express from "express";
@@ -467,9 +469,7 @@ const parseArguments = (): {
       cliArguments.shift();
       if (cliArguments[0] === undefined) {
         // eslint-disable-next-line
-        console.error(
-          "No argument supplied for --json-file option. Exiting."
-        );
+        console.error("No argument supplied for --json-file option. Exiting.");
         process.exit(1);
       }
       JSON_FILE = cliArguments[0];
@@ -569,20 +569,42 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
     identities: DeserializedIdentity[];
   };
 
-  getIP((error, ip): void => {
-    if (error !== null && error !== undefined) {
-      // eslint-disable-next-line no-console
-      console.log(
-        "Failed to retrieve your public IP address. This error usually means that you are not connected to the Internet, but there may be other causes as well (e.g. Internet censorship)."
-      );
-      return;
-    }
-    if (isV4Format(ip)) {
-      addresses.add(`${ip}:${AMPHITHEATER_PORT}`);
-    } else {
-      addresses.add(`[${ip}]:${AMPHITHEATER_PORT}`);
-    }
-  });
+  const IP_RETRIEVAL_INTERVAL = 5000;
+
+  // Otherwise, AMPHITHEATER_PORT is a Unix socket. Exposing the path might be a security risk.
+  if (typeof AMPHITHEATER_PORT === "number") {
+    const sleep = (ms: number): Promise<void> =>
+      new Promise((resolve): void => void setTimeout(resolve, ms));
+    (async (): Promise<void> => {
+      for (;;) {
+        await new Promise((resolve): void =>
+          getIP((error, ip): void => {
+            resolve();
+            if (error !== null && error !== undefined) {
+              // eslint-disable-next-line no-console
+              console.log(
+                "Failed to retrieve your public IP address. This error usually means that you are not connected to the Internet, but there may be other causes as well (e.g. Internet censorship).\n",
+                "Next attempt in ",
+                IP_RETRIEVAL_INTERVAL / 1000,
+                "s."
+              );
+              return;
+            }
+            if (isV4Format(ip)) {
+              const address = `${ip}:${AMPHITHEATER_PORT}`;
+              if (addresses.has(address)) return;
+              addresses.add(address);
+            } else {
+              const address = `[${ip}]:${AMPHITHEATER_PORT}`;
+              if (addresses.has(address)) return;
+              addresses.add(address);
+            }
+          })
+        );
+        await sleep(IP_RETRIEVAL_INTERVAL);
+      }
+    })();
+  }
 
   objectArray.forEach((object): void => {
     objects.add(object);
