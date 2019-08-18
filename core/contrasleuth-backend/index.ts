@@ -42,13 +42,6 @@ import { isV4Format } from "ip";
 
 const getIP = externalIP();
 
-// Monkey-patch Uint8Array for JSON serialization.
-Object.assign(Uint8Array.prototype, {
-  toJSON: function(): number[] {
-    return [...((this as unknown) as Uint8Array)];
-  }
-});
-
 // eslint-disable-next-line
 const isByteArray = (possiblyArray: any): boolean => {
   if (!Array.isArray(possiblyArray)) return false;
@@ -72,10 +65,10 @@ const createKeyPair = (): ContrasleuthKeyPair => {
   } = sodium.crypto_sign_keypair();
   return {
     type: "key pair",
-    publicEncryptionKey,
-    privateEncryptionKey,
-    publicSigningKey,
-    privateSigningKey
+    publicEncryptionKey: [...publicEncryptionKey],
+    privateEncryptionKey: [...privateEncryptionKey],
+    publicSigningKey: [...publicSigningKey],
+    privateSigningKey: [...privateSigningKey]
   };
 };
 
@@ -98,7 +91,7 @@ const createNewUnmoderatedGroup = (
   name: string
 ): ContrasleuthUnmoderatedGroup => ({
   name,
-  key: { type: "symmetric key", key: sodium.crypto_secretbox_keygen() }
+  key: { type: "symmetric key", key: [...sodium.crypto_secretbox_keygen()] }
 });
 
 const validatePublicHalf = ({
@@ -108,9 +101,9 @@ const validatePublicHalf = ({
 }: ContrasleuthSignedPublicHalf): ContrasleuthPublicHalf | undefined => {
   if (
     sodium.crypto_sign_verify_detached(
-      publicEncryptionKeySignature,
-      publicEncryptionKey,
-      publicSigningKey
+      new Uint8Array(publicEncryptionKeySignature),
+      new Uint8Array(publicEncryptionKey),
+      new Uint8Array(publicSigningKey)
     )
   ) {
     return { publicEncryptionKey, publicSigningKey };
@@ -124,12 +117,12 @@ const calculateRecipientDigest = (
     case "unmoderated group":
       return sodium.crypto_generichash(
         sodium.crypto_generichash_BYTES,
-        recipient.data.key.key
+        new Uint8Array(recipient.data.key.key)
       );
     case "public half":
       return sodium.crypto_generichash(
         sodium.crypto_generichash_BYTES,
-        recipient.data.publicSigningKey
+        new Uint8Array(recipient.data.publicSigningKey)
       );
   }
 };
@@ -153,21 +146,23 @@ const validateMessage = (
   }
   if (
     sodium.crypto_sign_verify_detached(
-      signature,
+      new Uint8Array(signature),
       new Uint8Array([
         ...sodium.crypto_generichash(sodium.crypto_generichash_BYTES, message),
         ...recipientDigest
       ]),
-      validatedPublicHalf.publicSigningKey
+      new Uint8Array(validatedPublicHalf.publicSigningKey)
     )
   ) {
     return {
       publicHalf: validatedPublicHalf,
       message,
-      signatureHash: sodium.crypto_generichash(
-        sodium.crypto_generichash_BYTES,
-        signature
-      ),
+      signatureHash: [
+        ...sodium.crypto_generichash(
+          sodium.crypto_generichash_BYTES,
+          new Uint8Array(signature)
+        )
+      ],
       recipient
     };
   }
@@ -179,10 +174,12 @@ const derivePublicHalf = (
   return {
     publicEncryptionKey: identity.publicEncryptionKey,
     publicSigningKey: identity.publicSigningKey,
-    publicEncryptionKeySignature: sodium.crypto_sign_detached(
-      identity.publicEncryptionKey,
-      identity.privateSigningKey
-    )
+    publicEncryptionKeySignature: [
+      ...sodium.crypto_sign_detached(
+        new Uint8Array(identity.publicEncryptionKey),
+        new Uint8Array(identity.privateSigningKey)
+      )
+    ]
   };
 };
 
@@ -191,15 +188,20 @@ const createSignedMessage = (
   message: string,
   recipient: ContrasleuthRecipient
 ): ContrasleuthSignedMessage => {
-  const recipientDigest = calculateRecipientDigest(recipient);
+  const recipientDigest = [...calculateRecipientDigest(recipient)];
   return {
-    signature: sodium.crypto_sign_detached(
-      new Uint8Array([
-        ...sodium.crypto_generichash(sodium.crypto_generichash_BYTES, message),
-        ...recipientDigest
-      ]),
-      identity.privateSigningKey
-    ),
+    signature: [
+      ...sodium.crypto_sign_detached(
+        new Uint8Array([
+          ...sodium.crypto_generichash(
+            sodium.crypto_generichash_BYTES,
+            message
+          ),
+          ...recipientDigest
+        ]),
+        new Uint8Array(identity.privateSigningKey)
+      )
+    ],
     publicHalf: derivePublicHalf(identity),
     message,
     recipientDigest
@@ -212,7 +214,11 @@ const createSymmetricallyEncryptedMessage = (
 ): Uint8Array => {
   const nonce = sodium.randombytes_buf(sodium.crypto_box_NONCEBYTES);
   return new Uint8Array([
-    ...sodium.crypto_secretbox_easy(JSON.stringify(message), nonce, key.key),
+    ...sodium.crypto_secretbox_easy(
+      JSON.stringify(message),
+      nonce,
+      new Uint8Array(key.key)
+    ),
     ...nonce
   ]);
 };
@@ -300,15 +306,13 @@ const parseMessage = (
   }
   const message: ContrasleuthSignedMessage = {
     message: data.message,
-    signature: new Uint8Array(data.signature),
+    signature: data.signature,
     publicHalf: {
-      publicEncryptionKey: new Uint8Array(data.publicHalf.publicEncryptionKey),
-      publicSigningKey: new Uint8Array(data.publicHalf.publicSigningKey),
-      publicEncryptionKeySignature: new Uint8Array(
-        data.publicHalf.publicEncryptionKeySignature
-      )
+      publicEncryptionKey: data.publicHalf.publicEncryptionKey,
+      publicSigningKey: data.publicHalf.publicSigningKey,
+      publicEncryptionKeySignature: data.publicHalf.publicEncryptionKeySignature
     },
-    recipientDigest: new Uint8Array(data.recipientDigest)
+    recipientDigest: data.recipientDigest
   };
 
   return validateMessage(message, recipient);
@@ -329,7 +333,12 @@ const decryptSymmetricallyEncryptedMessage = (
   );
 
   return parseMessage(
-    sodium.crypto_secretbox_open_easy(ciphertext2, nonce, key.key, "text"),
+    sodium.crypto_secretbox_open_easy(
+      ciphertext2,
+      nonce,
+      new Uint8Array(key.key),
+      "text"
+    ),
     recipient
   );
 };
@@ -507,18 +516,11 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
   // JSON doesn't support ES6 Sets.
   // These interfaces serves as intermediate data types before getting
   // converted to ContrasleuthIdentity proper.
-  interface DeserializedKeyPair {
-    type: "key pair";
-    publicSigningKey: number[];
-    privateSigningKey: number[];
-    publicEncryptionKey: number[];
-    privateEncryptionKey: number[];
-  }
 
   interface DeserializedIdentity {
     id: string;
     name: string;
-    keyPair: DeserializedKeyPair;
+    keyPair: ContrasleuthKeyPair;
     inbox: ContrasleuthMessage[];
     groups: ContrasleuthUnmoderatedGroup[];
   }
@@ -618,14 +620,10 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
         ),
         keyPair: {
           ...identity.keyPair,
-          publicSigningKey: new Uint8Array(identity.keyPair.publicSigningKey),
-          privateSigningKey: new Uint8Array(identity.keyPair.privateSigningKey),
-          publicEncryptionKey: new Uint8Array(
-            identity.keyPair.publicEncryptionKey
-          ),
-          privateEncryptionKey: new Uint8Array(
-            identity.keyPair.privateEncryptionKey
-          )
+          publicSigningKey: identity.keyPair.publicSigningKey,
+          privateSigningKey: identity.keyPair.privateSigningKey,
+          publicEncryptionKey: identity.keyPair.publicEncryptionKey,
+          privateEncryptionKey: identity.keyPair.privateEncryptionKey
         }
       })
     );
@@ -716,7 +714,7 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
     const stopDerivingInbox = deriveInbox(identity);
 
     const findUnmoderatedGroup = (
-      key: Uint8Array
+      key: number[]
     ): ContrasleuthUnmoderatedGroup | undefined =>
       groupMap.get(JSON.stringify(key));
 
@@ -761,7 +759,7 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
         response.sendStatus(400);
         return;
       }
-      const key = new Uint8Array(request.body.key);
+      const key = request.body.key;
       groups.add(observable({ name, key: { type: "symmetric key", key } }));
 
       response.sendStatus(200);
@@ -779,7 +777,7 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
         return;
       }
 
-      const key = new Uint8Array(request.body.key);
+      const key = request.body.key as number[];
       const group = findUnmoderatedGroup(key);
       if (group === undefined) {
         response.sendStatus(404);
@@ -796,7 +794,7 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
         return;
       }
 
-      const key = new Uint8Array(request.body.key);
+      const key = request.body.key;
       const group = findUnmoderatedGroup(key);
       if (group === undefined) {
         response.sendStatus(404);
@@ -821,7 +819,7 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
           return;
         }
 
-        const key = new Uint8Array(request.body.key);
+        const key = request.body.key as number[];
 
         const { keyPair } = identity;
 

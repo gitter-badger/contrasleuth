@@ -2,28 +2,28 @@ import { ObservableSet, IObservableObject } from "mobx";
 
 export interface ContrasleuthKeyPair {
   type: "key pair";
-  publicSigningKey: Uint8Array;
-  privateSigningKey: Uint8Array;
-  publicEncryptionKey: Uint8Array;
-  privateEncryptionKey: Uint8Array;
+  publicSigningKey: number[];
+  privateSigningKey: number[];
+  publicEncryptionKey: number[];
+  privateEncryptionKey: number[];
 }
 
 export interface ContrasleuthSymmetricKey {
   type: "symmetric key";
-  key: Uint8Array;
+  key: number[];
 }
 
 export type ContrasleuthKey = ContrasleuthKeyPair | ContrasleuthSymmetricKey;
 
 export interface ContrasleuthSignedPublicHalf {
-  publicSigningKey: Uint8Array;
-  publicEncryptionKey: Uint8Array;
-  publicEncryptionKeySignature: Uint8Array;
+  publicSigningKey: number[];
+  publicEncryptionKey: number[];
+  publicEncryptionKeySignature: number[];
 }
 
 export interface ContrasleuthPublicHalf {
-  publicSigningKey: Uint8Array;
-  publicEncryptionKey: Uint8Array;
+  publicSigningKey: number[];
+  publicEncryptionKey: number[];
 }
 
 export interface ContrasleuthUnmoderatedGroup {
@@ -42,17 +42,17 @@ export type ContrasleuthRecipient =
     };
 
 export interface ContrasleuthSignedMessage {
-  recipientDigest: Uint8Array;
+  recipientDigest: number[];
   publicHalf: ContrasleuthSignedPublicHalf;
   message: string;
-  signature: Uint8Array;
+  signature: number[];
 }
 
 export interface ContrasleuthMessage {
   recipient: ContrasleuthRecipient;
   publicHalf: ContrasleuthPublicHalf;
   message: string;
-  signatureHash: Uint8Array;
+  signatureHash: number[];
 }
 
 export interface ContrasleuthIdentity {
