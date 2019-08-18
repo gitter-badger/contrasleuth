@@ -865,7 +865,10 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
   const identityHandlerMap = new Map<string, IdentityHandler>();
 
   app.use("/:id/", (request, response, next): void => {
-    const id = request.params.id;
+    // inaccurate type definition, must work around
+    // https://expressjs.com/en/4x/api.html#req.params
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const id = (request.params as any).id;
     if (typeof id !== "string") {
       response.sendStatus(400);
       return;

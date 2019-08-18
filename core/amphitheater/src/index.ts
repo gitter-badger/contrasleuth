@@ -209,7 +209,10 @@ const instantiate = async (
   app.get(
     "/gossip/:hash",
     (request, response): void => {
-      const hash = request.params.hash;
+      // inaccurate type definition, must work around
+      // https://expressjs.com/en/4x/api.html#req.params
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const hash = (request.params as any).hash;
       if (typeof hash !== "string") {
         response.sendStatus(400);
         return;
@@ -521,7 +524,6 @@ const instantiate = async (
                 }
               }
 
-              // eslint-disable-next-line no-console
               handleNetworkingError(error);
             }
           );
@@ -555,6 +557,14 @@ const instantiate = async (
   };
 
   peers.forEach(handlePeer);
+
+  const reconnectToPeersEveryTwoSeconds = setInterval(() => {
+    peers.forEach(handlePeer);
+  }, 2000);
+
+  events.on("stop", () => {
+    clearInterval(reconnectToPeersEveryTwoSeconds);
+  });
 
   observe(
     peers,
