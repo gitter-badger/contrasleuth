@@ -55,7 +55,7 @@ const Inbox = () => (
         </ListItem>
       </List>
     </Card>
-    <Dialog open scroll="paper">
+    <Dialog open={false} scroll="paper">
       <Box p={3}>
         <Typography variant="h6">
           This is an example of speech synthesis in English.

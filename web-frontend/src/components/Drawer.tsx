@@ -2,7 +2,6 @@ import React, { useEffect, useRef } from "react";
 import { makeStyles } from "@material-ui/core/styles";
 import SwipeableDrawer from "@material-ui/core/SwipeableDrawer";
 import UserIcon from "@material-ui/icons/AccountCircle";
-import WiFiIcon from "@material-ui/icons/Wifi";
 import InboxIcon from "@material-ui/icons/Inbox";
 import GroupIcon from "@material-ui/icons/Group";
 import List from "@material-ui/core/List";
@@ -19,10 +18,14 @@ const useStyles = makeStyles({
 
 const Drawer = ({
   open,
-  setOpen
+  setOpen,
+  prefixWithoutTrailingSlash = "",
+  nameOfCurrentIdentity
 }: {
   open: boolean;
   setOpen: (open: boolean) => void;
+  prefixWithoutTrailingSlash?: string;
+  nameOfCurrentIdentity: string;
 }) => {
   const classes = useStyles();
   const hashChangeListenerRef = useRef(() => {
@@ -42,24 +45,18 @@ const Drawer = ({
       onClose={() => setOpen(false)}
     >
       <List>
-        <Link to="/identities">
+        <Link to="/">
           <ListItem button>
             <ListItemIcon className={classes.drawerIcon}>
               <UserIcon />
             </ListItemIcon>
             <ListItemText
               primary="Manage identities"
-              secondary="Logged in as 60794"
+              secondary={"Logged in as " + nameOfCurrentIdentity}
             />
           </ListItem>
         </Link>
-        <ListItem>
-          <ListItemIcon className={classes.drawerIcon}>
-            <WiFiIcon />
-          </ListItemIcon>
-          <ListItemText secondary="Connected to 10 peers (4 Internet, 2 Wi-Fi, 4 Bluetooth)" />
-        </ListItem>
-        <Link to="/inbox">
+        <Link to={prefixWithoutTrailingSlash + "/inbox"}>
           <ListItem button>
             <ListItemIcon className={classes.drawerIcon}>
               <InboxIcon />
