@@ -33,13 +33,13 @@ export interface ContrasleuthUnmoderatedGroup {
 
 export type ContrasleuthRecipient =
   | {
-      type: "unmoderated group";
-      data: ContrasleuthUnmoderatedGroup;
-    }
+    type: "unmoderated group";
+    data: ContrasleuthUnmoderatedGroup;
+  }
   | {
-      type: "public half";
-      data: ContrasleuthPublicHalf;
-    };
+    type: "public half";
+    data: ContrasleuthPublicHalf;
+  };
 
 export interface ContrasleuthSignedMessage {
   recipientDigest: number[];
@@ -53,6 +53,7 @@ export interface ContrasleuthMessage {
   publicHalf: ContrasleuthPublicHalf;
   message: string;
   signatureHash: number[];
+  receiveTime: string;
 }
 
 export interface ContrasleuthIdentity {

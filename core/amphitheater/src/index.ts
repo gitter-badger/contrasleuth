@@ -19,6 +19,7 @@ export interface AmphitheaterObject {
   payload: string;
   nonce: bigint;
   expirationTime: bigint;
+  receiveTime: bigint;
 }
 
 export interface AmphitheaterPeer {
@@ -296,7 +297,7 @@ const instantiate = async (
       const currentTime = BigInt(Date.now()) / 1000n;
       const timeToLive = expirationTime - currentTime;
 
-      const object: AmphitheaterObject = { payload, nonce, expirationTime };
+      const object: AmphitheaterObject = { payload, nonce, expirationTime, receiveTime: currentTime };
 
       const objectHash = hashObject(object);
 
@@ -309,7 +310,7 @@ const instantiate = async (
         return;
       }
 
-      objects.add({ payload, nonce, expirationTime });
+      objects.add({ payload, nonce, expirationTime, receiveTime: currentTime });
       response.end();
     }
   );
@@ -342,8 +343,10 @@ const instantiate = async (
       return;
     }
 
-    const handleNetworkingError = (error: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleNetworkingError = (error: any): void => {
       if (error.isAxiosError && silenceNetworkingErrors) return;
+      // eslint-disable-next-line no-console
       console.error(error);
     };
 
@@ -455,16 +458,18 @@ const instantiate = async (
                   const payload = data.payload;
                   const nonce = BigInt(data.nonce);
                   const expirationTime = BigInt(data.expirationTime);
+                  const currentTime = BigInt(Date.now()) / 1000n;
 
                   const timeToLive =
-                    expirationTime - BigInt(Date.now()) / 1000n;
+                    expirationTime - currentTime;
 
                   if (timeToLive < 0) return;
 
                   const object: AmphitheaterObject = {
                     payload,
                     nonce,
-                    expirationTime
+                    expirationTime,
+                    receiveTime: currentTime
                   };
 
                   const objectHash = hashObject(object);
@@ -502,6 +507,7 @@ const instantiate = async (
           axios.get(objectURL.toString(), { httpAgent: agent }).catch(
             (error): void => {
               if (!error.isAxiosError) {
+                // eslint-disable-next-line no-console
                 console.error(error);
                 return;
               }
@@ -558,11 +564,11 @@ const instantiate = async (
 
   peers.forEach(handlePeer);
 
-  const reconnectToPeersEveryTwoSeconds = setInterval(() => {
+  const reconnectToPeersEveryTwoSeconds = setInterval((): void => {
     peers.forEach(handlePeer);
   }, 2000);
 
-  events.on("stop", () => {
+  events.on("stop", (): void => {
     clearInterval(reconnectToPeersEveryTwoSeconds);
   });
 
@@ -597,10 +603,13 @@ const instantiate = async (
     payload: string,
     timeToLive: bigint
   ): Promise<AmphitheaterObject> => {
+    const currentTime = BigInt(Date.now()) / 1000n;
+
     const object: AmphitheaterObject = {
       expirationTime: timeToLive + BigInt(Date.now()) / 1000n,
       payload,
-      nonce: 0n
+      nonce: 0n,
+      receiveTime: currentTime
     };
 
     object.nonce = await nonBlockingProofOfWork(hashObject(object), timeToLive);

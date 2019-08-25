@@ -132,15 +132,16 @@ const validateMessage = (
     publicHalf,
     message,
     signature,
-    recipientDigest
+    recipientDigest,
   }: ContrasleuthSignedMessage,
-  recipient: ContrasleuthRecipient
+  recipient: ContrasleuthRecipient,
+  receiveTime: bigint
 ): ContrasleuthMessage | undefined => {
   const validatedPublicHalf = validatePublicHalf(publicHalf);
   if (validatedPublicHalf === undefined) return;
   const expectedRecipientDigest = calculateRecipientDigest(recipient);
   if (
-    JSON.stringify(expectedRecipientDigest) !== JSON.stringify(recipientDigest)
+    JSON.stringify([...expectedRecipientDigest]) !== JSON.stringify(recipientDigest)
   ) {
     return;
   }
@@ -163,7 +164,8 @@ const validateMessage = (
           new Uint8Array(signature)
         )
       ],
-      recipient
+      recipient,
+      receiveTime: receiveTime.toString()
     };
   }
 };
@@ -225,17 +227,18 @@ const createSymmetricallyEncryptedMessage = (
 
 const parseMessage = (
   plaintext: string,
-  recipient: ContrasleuthRecipient
+  recipient: ContrasleuthRecipient,
+  receiveTime: bigint
 ): ContrasleuthMessage | undefined => {
   type JSONParseResult =
     | {
-        type: "error";
-      }
+      type: "error";
+    }
     | {
-        type: "success";
-        // eslint-disable-next-line
-        data: any;
-      };
+      type: "success";
+      // eslint-disable-next-line
+      data: any;
+    };
 
   const parseJSON = (json: string): JSONParseResult => {
     try {
@@ -265,7 +268,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicSigningKey.length !==
-      sodium.crypto_sign_PUBLICKEYBYTES
+    sodium.crypto_sign_PUBLICKEYBYTES
   ) {
     return;
   }
@@ -275,7 +278,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKey.length !==
-      sodium.crypto_box_PUBLICKEYBYTES
+    sodium.crypto_box_PUBLICKEYBYTES
   ) {
     return;
   }
@@ -285,7 +288,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKeySignature.length !==
-      sodium.crypto_sign_BYTES
+    sodium.crypto_sign_BYTES
   ) {
     return;
   }
@@ -315,13 +318,14 @@ const parseMessage = (
     recipientDigest: data.recipientDigest
   };
 
-  return validateMessage(message, recipient);
+  return validateMessage(message, recipient, receiveTime);
 };
 
 const decryptSymmetricallyEncryptedMessage = (
   key: ContrasleuthSymmetricKey,
   ciphertext: Uint8Array,
-  recipient: ContrasleuthRecipient
+  recipient: ContrasleuthRecipient,
+  receiveTime: bigint
 ): ContrasleuthMessage | undefined => {
   const nonce = ciphertext.subarray(
     ciphertext.length - sodium.crypto_box_NONCEBYTES,
@@ -339,7 +343,8 @@ const decryptSymmetricallyEncryptedMessage = (
       new Uint8Array(key.key),
       "text"
     ),
-    recipient
+    recipient,
+    receiveTime
   );
 };
 
@@ -392,13 +397,14 @@ const deriveInbox = (identity: ContrasleuthIdentity): (() => void) => {
     (message): string => Buffer.from(message.signatureHash).toString()
   );
 
-  const parseObject = (object: string): ContrasleuthMessage | undefined =>
+  const parseObject = (object: string, receiveTime: bigint): ContrasleuthMessage | undefined =>
     [...identity.groups]
       .map((group): ContrasleuthMessage | undefined =>
         decryptSymmetricallyEncryptedMessage(
           group.key,
           new Uint8Array(Buffer.from(object, "base64")),
-          { type: "unmoderated group", data: group }
+          { type: "unmoderated group", data: group },
+          receiveTime
         )
       )
       .find((message): boolean => message !== undefined);
@@ -413,14 +419,14 @@ const deriveInbox = (identity: ContrasleuthIdentity): (() => void) => {
 
   const initialParse = (): void => {
     objects.forEach((object): void =>
-      addMessageToInbox(parseObject(object.payload))
+      addMessageToInbox(parseObject(object.payload, object.receiveTime))
     );
   };
 
   const reactiveParse = (): (() => void) => {
     return observe(objects, (change): void => {
       if (change.type !== "add") return;
-      addMessageToInbox(parseObject(change.newValue.payload));
+      addMessageToInbox(parseObject(change.newValue.payload, change.newValue.receiveTime));
     });
   };
 
@@ -565,7 +571,7 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
     const sleep = (ms: number): Promise<void> =>
       new Promise((resolve): void => void setTimeout(resolve, ms));
     (async (): Promise<void> => {
-      for (;;) {
+      for (; ;) {
         await new Promise((resolve): void =>
           getIP((error, ip): void => {
             resolve();
