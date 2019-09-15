@@ -1,5 +1,7 @@
 # Contrasleuth
 
+[![Join the chat at https://gitter.im/contrasleuth/community](https://badges.gitter.im/contrasleuth/community.svg)](https://gitter.im/contrasleuth/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 Contrasleuth is a highly secure and distributed social network with a stellar user experience. Thanks to Contrasleuth's decentralized nature, Contrasleuth clients can automatically form networks with nearby devices and exchange information without the Internet.
 
 Contrasleuth uses DHTs sparingly and prefers to broadcast messages. DHTs are notoriously hard to secure and unreliable, especially when MANETs (Mobile Ad-hoc Networks) are involved. Contrasleuth doesn't store messages and objects based on interest like IPFS and Secure Scuttlebutt as that reduces utility and introduces points of centralization.
