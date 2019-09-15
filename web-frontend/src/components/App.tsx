@@ -7,21 +7,38 @@ import MenuIcon from "@material-ui/icons/Menu";
 import Typography from "@material-ui/core/Typography";
 import Toolbar from "@material-ui/core/Toolbar";
 import Box from "@material-ui/core/Box";
+import Dialog from "@material-ui/core/Dialog";
+import DialogTitle from "@material-ui/core/DialogTitle";
+import DialogContent from "@material-ui/core/DialogContent";
+import DialogContentText from "@material-ui/core/DialogContentText";
 import {
   HashRouter,
   Route,
   generatePath,
   match as Match
 } from "react-router-dom";
-import { Instance } from "mobx-state-tree";
+import { observer } from "mobx-react";
 
 import Inbox from "../pages/Inbox";
 import Identities from "../pages/Identities";
+import Groups from "../pages/Groups";
+import Contacts from "../pages/Contacts";
 import Drawer from "./Drawer";
+import ComposeMessage from "../pages/ComposeMessage";
 
-import * as rpc from "../rpc/sync-state-with-server";
+import * as state from "../rpc/sync-state-with-server";
 
 const theme = createMuiTheme({
+  typography: {
+    fontFamily: "'Fira Sans'"
+  },
+  palette: {
+    primary: { main: "#424242" },
+    secondary: { main: "#ffffff" }
+  }
+});
+
+const appBarTheme = createMuiTheme({
   typography: {
     fontFamily: "'Fira Sans'"
   },
@@ -53,7 +70,7 @@ const NormalAppBar = ({
   const [open, setOpen] = useState(false);
   const classes = useStyles();
   return (
-    <>
+    <ThemeProvider theme={appBarTheme}>
       <AppBar position="sticky">
         <Toolbar>
           <IconButton
@@ -76,14 +93,14 @@ const NormalAppBar = ({
         prefixWithoutTrailingSlash={prefixWithoutTrailingSlash}
       />
       <Box m={2} />
-    </>
+    </ThemeProvider>
   );
 };
 
 const SetIdentityAppBar = () => {
   const classes = useStyles();
   return (
-    <>
+    <ThemeProvider theme={appBarTheme}>
       <AppBar position="sticky">
         <Toolbar>
           <Typography variant="h6" className={classes.title}>
@@ -92,29 +109,16 @@ const SetIdentityAppBar = () => {
         </Toolbar>
       </AppBar>
       <Box m={2} />
-    </>
+    </ThemeProvider>
   );
 };
 
-const App: React.FC = () => {
+const App: React.FC = observer(() => {
   const classes = useStyles();
 
-  const [identities, setIdentities] = useState<
-    Instance<typeof rpc.Identities> | undefined
-  >(undefined);
-
-  useEffect(() => {
-    let dead = false;
-    rpc
-      .syncIdentities()
-      .then(
-        (identities: Instance<typeof rpc.Identities>) =>
-          !dead && setIdentities(identities)
-      );
-    return () => {
-      dead = true;
-    };
-  }, []);
+  const identities = state.useModel<typeof state.Identities>(() =>
+    state.syncIdentities()
+  );
 
   return (
     <ThemeProvider theme={theme}>
@@ -143,23 +147,70 @@ const App: React.FC = () => {
                     />
                     <Route
                       path={match.url + "/inbox"}
-                      component={() => <Inbox />}
+                      component={() => <Inbox identity={identity} />}
                     />
                     <Route
                       path={match.url + "/groups"}
-                      component={() => {
-                        console.error("What?!");
-                        return null;
-                      }}
+                      component={() => <Groups identity={identity} />}
+                    />
+                    <Route
+                      path={match.url + "/contacts"}
+                      component={() => <Contacts identity={identity} />}
+                    />
+                    <Route
+                      path={match.url + "/compose"}
+                      component={() => <ComposeMessage identity={identity} />}
                     />
                   </>
                 )}
               />
             ))}
+          <Box m={2} />
         </HashRouter>
       </div>
     </ThemeProvider>
   );
+});
+
+const Loading = () => {
+  // The dialog shows when 500 milliseconds have elapsed and the server is not ready yet.
+  // This is to prevent flicker when (a) the server is already running or (b) the device
+  // is powerful.
+  const [ready, setReady] = useState(false);
+  const [timeoutExpired, setTimeoutExpired] = useState(false);
+
+  useEffect(() => {
+    state.waitUntilServerReady().then(() => setReady(true));
+  }, []);
+
+  useEffect(() => {
+    const timeout = setTimeout(() => setTimeoutExpired(true), 500);
+    return () => clearTimeout(timeout);
+  }, []);
+
+  const loadingDialog = (
+    <ThemeProvider theme={theme}>
+      <Dialog open={!ready && timeoutExpired}>
+        <DialogTitle>Loading…</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Depending on your device, this could take some time.
+          </DialogContentText>
+        </DialogContent>
+      </Dialog>
+    </ThemeProvider>
+  );
+
+  if (!ready) {
+    return loadingDialog;
+  }
+
+  return (
+    <>
+      {loadingDialog}
+      <App />
+    </>
+  );
 };
 
-export default App;
+export default Loading;

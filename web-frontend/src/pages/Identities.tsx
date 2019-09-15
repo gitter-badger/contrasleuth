@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Link, generatePath } from "react-router-dom";
+import { generatePath } from "react-router-dom";
 import Card from "@material-ui/core/Card";
 import Divider from "@material-ui/core/Divider";
 import List from "@material-ui/core/List";
 import ListItem from "@material-ui/core/ListItem";
 import ListItemText from "@material-ui/core/ListItemText";
+import ListItemIcon from "@material-ui/core/ListItemIcon";
 import ListSubheader from "@material-ui/core/ListSubheader";
 import EditIcon from "@material-ui/icons/Edit";
 import DeleteForeverIcon from "@material-ui/icons/DeleteForever";
@@ -13,8 +14,6 @@ import AddIcon from "@material-ui/icons/Add";
 import Container from "@material-ui/core/Container";
 import IconButton from "@material-ui/core/IconButton";
 import { Instance } from "mobx-state-tree";
-import base32 from "hi-base32";
-import { crypto_generichash } from "libsodium-wrappers";
 import Dialog from "@material-ui/core/Dialog";
 import DialogActions from "@material-ui/core/DialogActions";
 import DialogContent from "@material-ui/core/DialogContent";
@@ -24,9 +23,11 @@ import Button from "@material-ui/core/Button";
 import TextField from "@material-ui/core/TextField";
 import { makeStyles } from "@material-ui/core/styles";
 import { observer } from "mobx-react";
+import { Redirect } from "react-router-dom";
 
-import * as rpc from "../rpc/sync-state-with-server";
+import * as state from "../rpc/sync-state-with-server";
 import * as commands from "../rpc/rpc-commands";
+import { calculateIdentityHash } from "../utils";
 
 const DeleteDialog = ({
   onClose,
@@ -42,7 +43,7 @@ const DeleteDialog = ({
   open: boolean;
 }) => {
   const [input, setInput] = useState("");
-  const typedIdentityHash = input.trim() === hash;
+  const typedIdentityHash = input.trim().toLowerCase() === hash.toLowerCase();
   return (
     <Dialog open={open} onClose={onClose}>
       <DialogTitle>Delete this identity?</DialogTitle>
@@ -59,6 +60,7 @@ const DeleteDialog = ({
           }}
         >
           <TextField
+            autoFocus
             placeholder={hash}
             fullWidth
             margin="normal"
@@ -66,6 +68,7 @@ const DeleteDialog = ({
               setInput(event.target.value);
             }}
             value={input}
+            variant="outlined"
           />
         </form>
       </DialogContent>
@@ -94,6 +97,11 @@ const RenameDialog = ({
 }) => {
   const [input, setInput] = useState(name);
   const inputIsEmpty = input.replace(/\s/g, "") === "";
+  useEffect(() => {
+    if (open === false) {
+      setInput(name);
+    }
+  }, [open, name]);
   return (
     <Dialog open={open} onClose={onClose}>
       <DialogTitle>{createNew ? "New identity" : "Rename"}</DialogTitle>
@@ -110,12 +118,15 @@ const RenameDialog = ({
           }}
         >
           <TextField
+            autoFocus
+            onFocus={event => !createNew && event.target.select()}
             fullWidth
             onChange={event => {
               setInput(event.target.value);
             }}
             placeholder="Name"
             value={input}
+            variant="outlined"
           />
         </form>
       </DialogContent>
@@ -133,12 +144,14 @@ const Identity = ({
   name,
   hash,
   onDelete,
-  onRename
+  onRename,
+  to
 }: {
   name: string;
   hash: string;
   onDelete: () => void;
   onRename: (name: string) => void;
+  to: string;
 }) => {
   const [actionIconsRef, setActionIconsRef] = useState<HTMLDivElement | null>(
     null
@@ -146,26 +159,35 @@ const Identity = ({
   enum State {
     Initial,
     RenameDialog,
-    DeleteConfirmation
+    DeleteConfirmation,
+    Redirect
   }
   const [state, setState] = useState(State.Initial);
   return (
     <>
-      <ListItem button>
+      <ListItem button onClick={() => setState(State.Redirect)}>
         <ListItemText primary={name} secondary={hash} />
         <div ref={setActionIconsRef} />
       </ListItem>
       <>
         {actionIconsRef &&
           createPortal(
-            <>
-              <IconButton onClick={() => setState(State.RenameDialog)}>
+            <div style={{ display: "flex" }}>
+              <IconButton
+                onClick={() => {
+                  setState(State.RenameDialog);
+                }}
+              >
                 <EditIcon />
               </IconButton>
-              <IconButton onClick={() => setState(State.DeleteConfirmation)}>
+              <IconButton
+                onClick={() => {
+                  setState(State.DeleteConfirmation);
+                }}
+              >
                 <DeleteForeverIcon />
               </IconButton>
-            </>,
+            </div>,
             actionIconsRef
           )}
       </>
@@ -192,6 +214,7 @@ const Identity = ({
         name={name}
         hash={hash}
       />
+      {state === State.Redirect && <Redirect to={to} />}
     </>
   );
 };
@@ -207,7 +230,7 @@ const Identities = observer(
   ({
     identities
   }: {
-    identities: Instance<typeof rpc.Identities> | undefined;
+    identities: Instance<typeof state.Identities> | undefined;
   }) => {
     const [createIdentity, setCreateIdentity] = useState(false);
 
@@ -224,40 +247,22 @@ const Identities = observer(
           </ListSubheader>
           <Divider />
           <List disablePadding>
-            {identities.map(identity => {
-              const identityHash = base32
-                .encode(
-                  crypto_generichash(
-                    10,
-                    new Uint8Array(identity.keyPair.publicSigningKey)
-                  )
-                )
-                .toLowerCase();
-              return (
-                <Link
-                  to={generatePath("/user/:id/inbox", { id: identity.id })}
-                  key={identity.id}
-                >
-                  <Identity
-                    name={identity.name}
-                    key={identity.id}
-                    hash={identityHash}
-                    onDelete={commands.handleIdentity(identity.id).delete}
-                    onRename={commands.handleIdentity(identity.id).rename}
-                  />
-                </Link>
-              );
-            })}
             {identities.length === 0 && (
-              <ListItem>
-                <ListItemText>
-                  There are no identities in here. Create an identity to use
-                  Contrasleuth.
-                </ListItemText>
-                <Button onClick={() => setCreateIdentity(true)}>
-                  Create one
-                </Button>
-              </ListItem>
+              <>
+                <ListItem>
+                  <ListItemText>
+                    There are no identities in here. Create an identity to use
+                    Contrasleuth.
+                  </ListItemText>
+                </ListItem>
+                <Divider />
+                <ListItem button onClick={() => setCreateIdentity(true)}>
+                  <ListItemIcon>
+                    <AddIcon />
+                  </ListItemIcon>
+                  <ListItemText>Create a new identity</ListItemText>
+                </ListItem>
+              </>
             )}
             <RenameDialog
               open={createIdentity}
@@ -269,6 +274,32 @@ const Identities = observer(
               }}
               createNew
             />
+            {identities.length > 0 && (
+              <>
+                <ListItem>
+                  <ListItemText>
+                    Select an identity below to log in.
+                  </ListItemText>
+                </ListItem>
+                <Divider />
+              </>
+            )}
+            {identities.map(identity => {
+              const identityHash = calculateIdentityHash(
+                identity.keyPair.publicSigningKey,
+                identity.keyPair.publicEncryptionKey
+              );
+              return (
+                <Identity
+                  name={identity.name}
+                  key={identity.id}
+                  hash={identityHash}
+                  onDelete={commands.handleIdentity(identity.id).delete}
+                  onRename={commands.handleIdentity(identity.id).rename}
+                  to={generatePath("/user/:id/inbox", { id: identity.id })}
+                />
+              );
+            })}
           </List>
         </Card>
       </Container>

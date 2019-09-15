@@ -35,7 +35,8 @@ import {
   ContrasleuthUnmoderatedGroup,
   ContrasleuthRecipient,
   ContrasleuthSignedMessage,
-  ContrasleuthMessage
+  ContrasleuthMessage,
+  ContrasleuthContact
 } from "./interfaces";
 import externalIP from "external-ip";
 import { isV4Format } from "ip";
@@ -84,6 +85,9 @@ const createIdentity = (
     groups: observable(new Set() as Set<
       IObservableObject & ContrasleuthUnmoderatedGroup
     >),
+    contacts: observable(new Set() as Set<
+      IObservableObject & ContrasleuthContact
+    >),
     id: uuid()
   });
 
@@ -122,7 +126,10 @@ const calculateRecipientDigest = (
     case "public half":
       return sodium.crypto_generichash(
         sodium.crypto_generichash_BYTES,
-        new Uint8Array(recipient.data.publicSigningKey)
+        new Uint8Array([
+          ...recipient.data.publicSigningKey,
+          ...recipient.data.publicEncryptionKey
+        ])
       );
   }
 };
@@ -132,7 +139,7 @@ const validateMessage = (
     publicHalf,
     message,
     signature,
-    recipientDigest,
+    recipientDigest
   }: ContrasleuthSignedMessage,
   recipient: ContrasleuthRecipient,
   receiveTime: bigint
@@ -141,7 +148,8 @@ const validateMessage = (
   if (validatedPublicHalf === undefined) return;
   const expectedRecipientDigest = calculateRecipientDigest(recipient);
   if (
-    JSON.stringify([...expectedRecipientDigest]) !== JSON.stringify(recipientDigest)
+    JSON.stringify([...expectedRecipientDigest]) !==
+    JSON.stringify(recipientDigest)
   ) {
     return;
   }
@@ -225,6 +233,15 @@ const createSymmetricallyEncryptedMessage = (
   ]);
 };
 
+const createAsymmetricallyEncryptedMessage = (
+  key: ContrasleuthPublicHalf,
+  message: ContrasleuthSignedMessage
+): Uint8Array =>
+  sodium.crypto_box_seal(
+    JSON.stringify(message),
+    new Uint8Array(key.publicEncryptionKey)
+  );
+
 const parseMessage = (
   plaintext: string,
   recipient: ContrasleuthRecipient,
@@ -232,13 +249,13 @@ const parseMessage = (
 ): ContrasleuthMessage | undefined => {
   type JSONParseResult =
     | {
-      type: "error";
-    }
+        type: "error";
+      }
     | {
-      type: "success";
-      // eslint-disable-next-line
-      data: any;
-    };
+        type: "success";
+        // eslint-disable-next-line
+        data: any;
+      };
 
   const parseJSON = (json: string): JSONParseResult => {
     try {
@@ -268,7 +285,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicSigningKey.length !==
-    sodium.crypto_sign_PUBLICKEYBYTES
+      sodium.crypto_sign_PUBLICKEYBYTES
   ) {
     return;
   }
@@ -278,7 +295,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKey.length !==
-    sodium.crypto_box_PUBLICKEYBYTES
+      sodium.crypto_box_PUBLICKEYBYTES
   ) {
     return;
   }
@@ -288,7 +305,7 @@ const parseMessage = (
       (element: any): boolean => typeof element !== "number"
     ) ||
     data.publicHalf.publicEncryptionKeySignature.length !==
-    sodium.crypto_sign_BYTES
+      sodium.crypto_sign_BYTES
   ) {
     return;
   }
@@ -335,17 +352,38 @@ const decryptSymmetricallyEncryptedMessage = (
     0,
     ciphertext.length - sodium.crypto_box_NONCEBYTES
   );
-
-  return parseMessage(
-    sodium.crypto_secretbox_open_easy(
+  let decrypted = "";
+  try {
+    decrypted = sodium.crypto_secretbox_open_easy(
       ciphertext2,
       nonce,
       new Uint8Array(key.key),
       "text"
-    ),
-    recipient,
-    receiveTime
-  );
+    );
+  } catch {
+    return undefined;
+  }
+  return parseMessage(decrypted, recipient, receiveTime);
+};
+
+const decryptAsymmetricallyEncryptedMessage = (
+  key: ContrasleuthKeyPair,
+  ciphertext: Uint8Array,
+  recipient: ContrasleuthRecipient,
+  receiveTime: bigint
+): ContrasleuthMessage | undefined => {
+  let decrypted = "";
+  try {
+    decrypted = sodium.crypto_box_seal_open(
+      ciphertext,
+      new Uint8Array(key.publicEncryptionKey),
+      new Uint8Array(key.privateEncryptionKey),
+      "text"
+    );
+  } catch {
+    return undefined;
+  }
+  return parseMessage(decrypted, recipient, receiveTime);
 };
 
 const objects: ObservableSet<AmphitheaterObject> = observable(
@@ -397,17 +435,32 @@ const deriveInbox = (identity: ContrasleuthIdentity): (() => void) => {
     (message): string => Buffer.from(message.signatureHash).toString()
   );
 
-  const parseObject = (object: string, receiveTime: bigint): ContrasleuthMessage | undefined =>
-    [...identity.groups]
-      .map((group): ContrasleuthMessage | undefined =>
+  const parseObject = (
+    object: string,
+    receiveTime: bigint
+  ): ContrasleuthMessage | undefined =>
+    [
+      ...[...identity.groups].map((group): ContrasleuthMessage | undefined =>
         decryptSymmetricallyEncryptedMessage(
           group.key,
           new Uint8Array(Buffer.from(object, "base64")),
           { type: "unmoderated group", data: group },
           receiveTime
         )
+      ),
+      decryptAsymmetricallyEncryptedMessage(
+        identity.keyPair,
+        new Uint8Array(Buffer.from(object, "base64")),
+        {
+          type: "public half",
+          data: {
+            publicEncryptionKey: identity.keyPair.publicEncryptionKey,
+            publicSigningKey: identity.keyPair.publicSigningKey
+          }
+        },
+        receiveTime
       )
-      .find((message): boolean => message !== undefined);
+    ].find((message): boolean => message !== undefined);
 
   const addMessageToInbox = (
     message: ContrasleuthMessage | undefined
@@ -426,7 +479,9 @@ const deriveInbox = (identity: ContrasleuthIdentity): (() => void) => {
   const reactiveParse = (): (() => void) => {
     return observe(objects, (change): void => {
       if (change.type !== "add") return;
-      addMessageToInbox(parseObject(change.newValue.payload, change.newValue.receiveTime));
+      addMessageToInbox(
+        parseObject(change.newValue.payload, change.newValue.receiveTime)
+      );
     });
   };
 
@@ -529,6 +584,7 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
     keyPair: ContrasleuthKeyPair;
     inbox: ContrasleuthMessage[];
     groups: ContrasleuthUnmoderatedGroup[];
+    contacts: ContrasleuthContact[];
   }
 
   const {
@@ -571,7 +627,7 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
     const sleep = (ms: number): Promise<void> =>
       new Promise((resolve): void => void setTimeout(resolve, ms));
     (async (): Promise<void> => {
-      for (; ;) {
+      for (;;) {
         await new Promise((resolve): void =>
           getIP((error, ip): void => {
             resolve();
@@ -624,6 +680,12 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
               IObservableObject => observable(group))
           )
         ),
+        contacts: observable(
+          new Set(
+            identity.contacts.map((contact): ContrasleuthContact &
+              IObservableObject => observable(contact))
+          )
+        ),
         keyPair: {
           ...identity.keyPair,
           publicSigningKey: identity.keyPair.publicSigningKey,
@@ -666,7 +728,8 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
         identities: [...identities].map((identity): any => ({
           ...identity,
           inbox: [...identity.inbox],
-          groups: [...identity.groups]
+          groups: [...identity.groups],
+          contacts: [...identity.contacts]
         }))
       })
     );
@@ -706,7 +769,7 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
   const handleIdentitySpecificRoutes = (
     identity: IObservableObject & ContrasleuthIdentity
   ): IdentityHandler => {
-    const { groups, inbox } = identity;
+    const { groups, inbox, contacts } = identity;
 
     const router = express.Router();
 
@@ -716,6 +779,35 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
     } = deriveMapFromObservableSet(groups, (group): string => {
       return JSON.stringify(group.key.key);
     });
+
+    const {
+      map: contactMap,
+      stop: stopDerivingContactMap
+    } = deriveMapFromObservableSet(contacts, ({ id }): string => id);
+
+    const [findContactByPublicHalf, stopDerivingSecondContactMap] = ((): [
+      (
+        publicEncryptionKey: number[],
+        publicSigningKey: number[]
+      ) => ContrasleuthContact | undefined,
+      () => void
+    ] => {
+      const { map, stop } = deriveMapFromObservableSet(
+        contacts,
+        ({ publicHalf: { publicEncryptionKey, publicSigningKey } }): string =>
+          JSON.stringify([...publicEncryptionKey, ...publicSigningKey])
+      );
+      return [
+        (
+          publicEncryptionKey: number[],
+          publicSigningKey: number[]
+        ): ContrasleuthContact | undefined =>
+          map.get(
+            JSON.stringify([...publicEncryptionKey, ...publicSigningKey])
+          ),
+        stop
+      ];
+    })();
 
     const stopDerivingInbox = deriveInbox(identity);
 
@@ -765,7 +857,14 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
         response.sendStatus(400);
         return;
       }
+
       const key = request.body.key;
+      const group = findUnmoderatedGroup(key);
+      if (group !== undefined) {
+        response.sendStatus(409);
+        return;
+      }
+
       groups.add(observable({ name, key: { type: "symmetric key", key } }));
 
       response.sendStatus(200);
@@ -855,6 +954,136 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
       }
     );
 
+    router.post(
+      "/send-asymmetrically-encrypted-message",
+      async (request, response): Promise<void> => {
+        const content = request.body.content;
+
+        if (
+          typeof content !== "string" ||
+          !isByteArray(request.body.publicSigningKey) ||
+          !isByteArray(request.body.publicEncryptionKey) ||
+          isNaN(request.body.timeToLive)
+        ) {
+          response.sendStatus(400);
+          return;
+        }
+
+        const publicSigningKey = request.body.publicSigningKey as number[];
+        const publicEncryptionKey = request.body
+          .publicEncryptionKey as number[];
+
+        const { keyPair } = identity;
+        const recipient: ContrasleuthRecipient = {
+          type: "public half",
+          data: {
+            publicSigningKey,
+            publicEncryptionKey
+          }
+        };
+
+        const timeToLive = BigInt(request.body.timeToLive);
+
+        objects.add(
+          await createObject(
+            Buffer.from(
+              createAsymmetricallyEncryptedMessage(
+                recipient.data,
+                createSignedMessage(keyPair, content, recipient)
+              )
+            ).toString("base64"),
+            timeToLive
+          )
+        );
+
+        response.sendStatus(200);
+      }
+    );
+
+    router.get("/contacts", (_request, response): void => {
+      response.send([...contacts]);
+    });
+
+    router.post("/add-contact", (request, response): void => {
+      if (
+        typeof request.body.name !== "string" ||
+        !isByteArray(request.body.publicSigningKey) ||
+        !isByteArray(request.body.publicEncryptionKey)
+      ) {
+        response.sendStatus(400);
+        return;
+      }
+
+      const name = request.body.name as string;
+      const publicSigningKey = request.body.publicSigningKey as number[];
+      const publicEncryptionKey = request.body.publicEncryptionKey as number[];
+
+      if (
+        findContactByPublicHalf(publicEncryptionKey, publicSigningKey) !==
+        undefined
+      ) {
+        response.sendStatus(409);
+        return;
+      }
+
+      contacts.add(
+        observable({
+          id: uuid(),
+          name,
+          publicHalf: {
+            publicSigningKey,
+            publicEncryptionKey
+          }
+        })
+      );
+
+      response.sendStatus(200);
+    });
+
+    router.post("/edit-contact", (request, response): void => {
+      if (
+        typeof request.body.id !== "string" ||
+        typeof request.body.name !== "string" ||
+        !isByteArray(request.body.publicSigningKey) ||
+        !isByteArray(request.body.publicEncryptionKey)
+      ) {
+        response.sendStatus(400);
+        return;
+      }
+
+      const id = request.body.id as string;
+      const name = request.body.name as string;
+      const publicSigningKey = request.body.publicSigningKey as number[];
+      const publicEncryptionKey = request.body.publicEncryptionKey as number[];
+
+      const contact = contactMap.get(id);
+      if (contact === undefined) {
+        response.sendStatus(404);
+        return;
+      }
+
+      Object.assign(contact, { name, publicSigningKey, publicEncryptionKey });
+      response.sendStatus(200);
+    });
+
+    router.post("/delete-contact", (request, response): void => {
+      if (typeof request.body.id !== "string") {
+        response.sendStatus(400);
+        return;
+      }
+
+      const id = request.body.id as string;
+
+      const contact = contactMap.get(id);
+      if (contact === undefined) {
+        response.sendStatus(404);
+        return;
+      }
+
+      contacts.delete(contact);
+      response.sendStatus(200);
+    });
+
     router.get("/inbox", (_request, response): void => {
       response.send([...inbox]);
     });
@@ -864,6 +1093,8 @@ const { JSON_FILE, AMPHITHEATER_PORT, API_SERVER_PORT } = parseArguments();
       stop: (): void => {
         stopDerivingGroupMap();
         stopDerivingInbox();
+        stopDerivingContactMap();
+        stopDerivingSecondContactMap();
       }
     };
   };

@@ -33,13 +33,13 @@ export interface ContrasleuthUnmoderatedGroup {
 
 export type ContrasleuthRecipient =
   | {
-    type: "unmoderated group";
-    data: ContrasleuthUnmoderatedGroup;
-  }
+      type: "unmoderated group";
+      data: ContrasleuthUnmoderatedGroup;
+    }
   | {
-    type: "public half";
-    data: ContrasleuthPublicHalf;
-  };
+      type: "public half";
+      data: ContrasleuthPublicHalf;
+    };
 
 export interface ContrasleuthSignedMessage {
   recipientDigest: number[];
@@ -56,10 +56,17 @@ export interface ContrasleuthMessage {
   receiveTime: string;
 }
 
+export interface ContrasleuthContact {
+  id: string;
+  name: string;
+  publicHalf: ContrasleuthPublicHalf;
+}
+
 export interface ContrasleuthIdentity {
   id: string;
   name: string;
   keyPair: ContrasleuthKeyPair;
   inbox: ObservableSet<IObservableObject & ContrasleuthMessage>;
   groups: ObservableSet<IObservableObject & ContrasleuthUnmoderatedGroup>;
+  contacts: ObservableSet<IObservableObject & ContrasleuthContact>;
 }

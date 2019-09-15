@@ -4,6 +4,7 @@ import SwipeableDrawer from "@material-ui/core/SwipeableDrawer";
 import UserIcon from "@material-ui/icons/AccountCircle";
 import InboxIcon from "@material-ui/icons/Inbox";
 import GroupIcon from "@material-ui/icons/Group";
+import ContactsIcon from "@material-ui/icons/Contacts";
 import List from "@material-ui/core/List";
 import ListItem from "@material-ui/core/ListItem";
 import ListItemIcon from "@material-ui/core/ListItemIcon";
@@ -45,7 +46,7 @@ const Drawer = ({
       onClose={() => setOpen(false)}
     >
       <List>
-        <Link to="/">
+        <Link to="/" onClick={() => setOpen(false)}>
           <ListItem button>
             <ListItemIcon className={classes.drawerIcon}>
               <UserIcon />
@@ -56,7 +57,10 @@ const Drawer = ({
             />
           </ListItem>
         </Link>
-        <Link to={prefixWithoutTrailingSlash + "/inbox"}>
+        <Link
+          to={prefixWithoutTrailingSlash + "/inbox"}
+          onClick={() => setOpen(false)}
+        >
           <ListItem button>
             <ListItemIcon className={classes.drawerIcon}>
               <InboxIcon />
@@ -64,12 +68,23 @@ const Drawer = ({
             <ListItemText primary="Inbox" />
           </ListItem>
         </Link>
-        <Link to="/">
+        <Link
+          to={prefixWithoutTrailingSlash + "/groups"}
+          onClick={() => setOpen(false)}
+        >
           <ListItem button>
             <ListItemIcon className={classes.drawerIcon}>
               <GroupIcon />
             </ListItemIcon>
             <ListItemText primary="Groups" />
+          </ListItem>
+        </Link>
+        <Link to="./contacts" onClick={() => setOpen(false)}>
+          <ListItem button>
+            <ListItemIcon className={classes.drawerIcon}>
+              <ContactsIcon />
+            </ListItemIcon>
+            <ListItemText primary="Contacts" />
           </ListItem>
         </Link>
       </List>

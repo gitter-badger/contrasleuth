@@ -1,5 +1,6 @@
 import axios from "./unix-socket-axios";
 import { types, applySnapshot, IAnyType, Instance } from "mobx-state-tree";
+import { useEffect, useState } from "react";
 
 export const waitUntilServerReady = async () => {
   for (;;) {
@@ -13,13 +14,22 @@ export const waitUntilServerReady = async () => {
 };
 
 const syncModel = (model: IAnyType, path: string) => (): Promise<
-  Instance<typeof model>
+  [Instance<typeof model>, () => void]
 > =>
   new Promise(async resolve => {
-    const node = model.create((await axios.get(path)).data);
-    resolve(node);
-    for (;;) {
-      applySnapshot(node, (await axios.get(path)).data);
+    let previousResponse = (await axios.get(path)).data;
+    const node = model.create(previousResponse);
+    let dead = false;
+    const unsubscribe = () => {
+      dead = true;
+    };
+    resolve([node, unsubscribe]);
+    while (!dead) {
+      const currentResponse = (await axios.get(path)).data;
+      if (JSON.stringify(currentResponse) === JSON.stringify(previousResponse))
+        continue;
+      applySnapshot(node, currentResponse);
+      previousResponse = currentResponse;
     }
   });
 
@@ -71,7 +81,14 @@ export const Message = types.model("Message", {
   recipient: Recipient,
   publicHalf: PublicHalf,
   message: types.string,
-  signatureHash: types.array(types.number)
+  signatureHash: types.array(types.number),
+  receiveTime: types.string
+});
+
+export const Contact = types.model("Contact", {
+  id: types.string,
+  name: types.string,
+  publicHalf: PublicHalf
 });
 
 export const Inbox = types.array(Message);
@@ -83,3 +100,33 @@ export const Groups = types.array(UnmoderatedGroup);
 
 export const syncGroups = (identity: Instance<typeof Identity>) =>
   syncModel(Groups, `/${identity.id}/groups`)();
+
+export const Contacts = types.array(Contact);
+
+export const syncContacts = (identity: Instance<typeof Identity>) =>
+  syncModel(Contacts, `/${identity.id}/contacts`)();
+
+export const useModel = <T>(
+  syncModel: () => Promise<[Instance<T>, () => void]>
+): Instance<T> | undefined => {
+  const [state, setState] = useState<Instance<T> | undefined>();
+
+  useEffect(() => {
+    let dead = false;
+    let cleanup = () => {};
+    syncModel().then(([state, unsubscribe]) => {
+      if (dead) {
+        unsubscribe();
+        return;
+      }
+      cleanup = unsubscribe;
+      setState(state);
+    });
+    return () => {
+      dead = true;
+      cleanup();
+    };
+    // eslint-disable-next-line
+  }, []);
+  return state;
+};
